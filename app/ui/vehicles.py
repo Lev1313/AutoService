@@ -229,6 +229,9 @@ class RepairDialog(SafeDialog):
         cancel = QPushButton("Отмена")
         cancel.clicked.connect(self.reject)
         row.addWidget(cancel)
+        self.document_button = QPushButton("Документ / Печать")
+        self.document_button.clicked.connect(self.open_documents)
+        row.addWidget(self.document_button)
         row.addStretch()
         self.save_button = QPushButton("Сохранить")
         self.save_button.clicked.connect(self.save)
@@ -249,7 +252,7 @@ class RepairDialog(SafeDialog):
             "description": self.description.toPlainText(),
         }
 
-    def save(self, checked=False, *, completed=None):
+    def save(self, checked=False, *, completed=None, close=True):
         try:
             values = self.state()
             km = values["km"].replace(" ", "").replace("\u00a0", "").strip()
@@ -280,7 +283,7 @@ class RepairDialog(SafeDialog):
                 )
                 if not allow_unverified:
                     return
-            self.records.save_repair(
+            repair_id = self.records.save_repair(
                 self.vehicle_id,
                 values,
                 self.repair.get("id"),
@@ -288,8 +291,34 @@ class RepairDialog(SafeDialog):
             )
         except ERRORS as error:
             QMessageBox.warning(self, "Не удалось сохранить ремонт", str(error))
-            return
-        self.accept()
+            return False
+        self.repair = next(
+            row for row in self.records.repairs(self.vehicle_id) if row["id"] == repair_id
+        )
+        self.original = self.state()
+        self.finish_button.setVisible(not self.repair["completed"])
+        if close:
+            self.accept()
+        return True
+
+    def open_documents(self):
+        from app.ui.documents import DocumentDialog
+
+        if self.repair.get("id") is None or self.state() != self.original:
+            if (
+                QMessageBox.question(
+                    self,
+                    "Сохранить ремонт?",
+                    "Сначала сохранить запись ремонта для документа?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes,
+                )
+                != QMessageBox.StandardButton.Yes
+            ):
+                return
+            if not self.save(close=False):
+                return
+        DocumentDialog(self.records, self.repair["id"], self).exec()
 
 
 class VehicleCard(QDialog):
@@ -332,6 +361,9 @@ class VehicleCard(QDialog):
         self.open_button = QPushButton("Открыть выбранный ремонт")
         self.open_button.clicked.connect(self.open_repair)
         bottom.addWidget(self.open_button)
+        document_button = QPushButton("Документы / Печать")
+        document_button.clicked.connect(self.open_documents)
+        bottom.addWidget(document_button)
         bottom.addStretch()
         close = QPushButton("Закрыть")
         close.clicked.connect(self.accept)
@@ -406,6 +438,13 @@ class VehicleCard(QDialog):
             and RepairDialog(self.records, self.vehicle_id, self.rows[row], self).exec()
         ):
             self.refresh()
+
+    def open_documents(self):
+        from app.ui.documents import DocumentDialog
+
+        row = self.history.currentRow()
+        if 0 <= row < len(self.rows):
+            DocumentDialog(self.records, self.rows[row]["id"], self).exec()
 
 
 class VehiclesPage(QWidget):

@@ -7,7 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 SCHEMA_V2 = (
     """CREATE TABLE contacts (id INTEGER PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '')""",
@@ -65,6 +65,20 @@ SCHEMA_V3 = (
     """CREATE TABLE vehicle_call_preferences (
     vehicle_id INTEGER PRIMARY KEY REFERENCES vehicles(id),
     allow_calls INTEGER NOT NULL DEFAULT 1 CHECK(allow_calls IN (0,1)))""",
+)
+
+SCHEMA_V4 = (
+    """CREATE TABLE document_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)""",
+    """CREATE TABLE document_drafts (
+    repair_id INTEGER PRIMARY KEY REFERENCES repairs(id), payload TEXT NOT NULL)""",
+    """CREATE TABLE documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE,
+    repair_id INTEGER NOT NULL REFERENCES repairs(id), created_at TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('simple','detailed')), payload TEXT NOT NULL)""",
+    "CREATE INDEX documents_repair ON documents(repair_id, id DESC)",
+    """CREATE TABLE document_files (
+    document_id INTEGER PRIMARY KEY REFERENCES documents(id),
+    content BLOB NOT NULL, sha256 TEXT NOT NULL)""",
 )
 
 
@@ -141,6 +155,9 @@ def initialize_database(path: Path) -> None:
         if version < 3:
             for statement in SCHEMA_V3:
                 connection.execute(statement)
+        if version < 4:
+            for statement in SCHEMA_V4:
+                connection.execute(statement)
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         validate_tables(connection)
 
@@ -160,6 +177,10 @@ def validate_tables(connection):
         "FROM call_tasks",
         "SELECT id, task_id, attempted_at, outcome, note, next_date FROM call_attempts",
         "SELECT vehicle_id, allow_calls FROM vehicle_call_preferences",
+        "SELECT key, value FROM document_settings",
+        "SELECT repair_id, payload FROM document_drafts",
+        "SELECT id, number, repair_id, created_at, kind, payload FROM documents",
+        "SELECT document_id, content, sha256 FROM document_files",
     ):
         connection.execute(statement)
 

@@ -121,6 +121,9 @@ class MainWindow(QMainWindow):
                 restore_button = QPushButton("Восстановить из копии")
                 restore_button.clicked.connect(self.restore_backup)
                 content.addWidget(restore_button)
+                document_settings = QPushButton("Реквизиты для квитанций")
+                document_settings.clicked.connect(self.document_settings)
+                content.addWidget(document_settings)
             else:
                 content.addWidget(label("Будет реализовано позже", "badge"))
                 description = "Финансовый учёт отложен до отдельного согласования."
@@ -151,6 +154,12 @@ class MainWindow(QMainWindow):
         self.navigation.setCurrentRow(1)
         self.vehicles_page.search.setFocus()
         self.vehicles_page.search.selectAll()
+
+    def document_settings(self):
+        from app.services.documents import Documents
+        from app.ui.documents import DocumentSettingsDialog
+
+        DocumentSettingsDialog(Documents(self.db_path), self).exec()
 
     def create_backup(self):
         filename, _ = QFileDialog.getSaveFileName(
