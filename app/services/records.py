@@ -144,7 +144,7 @@ class Records:
             return [
                 dict(row)
                 for row in connection.execute(
-                    """SELECT r.*, o.km, o.verified FROM repairs r
+                    """SELECT r.*, COALESCE(o.km,r.undated_km) AS km, o.verified FROM repairs r
                 LEFT JOIN odometer_readings o ON o.repair_id = r.id
                 WHERE r.vehicle_id = ? ORDER BY r.visit_date DESC, r.id DESC""",
                     (vehicle_id,),
@@ -181,19 +181,48 @@ class Records:
         allow_unverified: bool = False,
     ) -> int:
         visit_date = values.get("visit_date")
-        try:
-            date.fromisoformat(visit_date)
-        except (ValueError, TypeError):
-            raise ValueError("Укажите корректную дату ремонта.") from None
+        existing = None
+        if repair_id is not None:
+            existing = next(
+                (row for row in self.repairs(vehicle_id) if row["id"] == repair_id), None
+            )
+        if visit_date is None and existing and existing["origin"] == "txt":
+            pass
+        else:
+            try:
+                date.fromisoformat(visit_date)
+            except (ValueError, TypeError):
+                raise ValueError("Укажите корректную дату ремонта.") from None
         km = values.get("km")
         if km is not None and (type(km) is not int or not 0 <= km <= 100_000_000):
             raise ValueError("Пробег должен быть целым неотрицательным числом.")
         amount = values.get("amount_kopecks")
         if amount is not None and (type(amount) is not int or not 0 <= amount <= 99_999_999_999):
             raise ValueError("Стоимость должна быть целым неотрицательным числом копеек.")
-        verified = km is None or self.mileage_consistent(vehicle_id, visit_date, km, repair_id)
-        if not verified and not allow_unverified:
+        requested_verified = (
+            bool(values.get("mileage_verified", existing.get("verified", False)))
+            if existing and existing["origin"] == "txt"
+            else True
+        )
+        if (
+            existing
+            and existing["origin"] == "txt"
+            and requested_verified
+            and (km is None or visit_date is None)
+        ):
+            raise ValueError("Для достоверного замера нужны дата и пробег.")
+        consistent = (
+            km is None
+            or visit_date is None
+            or self.mileage_consistent(vehicle_id, visit_date, km, repair_id)
+        )
+        verified = requested_verified and consistent and visit_date is not None
+        if not consistent and requested_verified and not allow_unverified:
             raise ValueError("Пробег противоречит истории. Проверьте его перед сохранением.")
+        state_known = int(
+            bool(values.get("state_known", existing["state_known"] if existing else True))
+            or bool(values.get("completed"))
+        )
         with connect(self.path) as connection:
             exists = connection.execute(
                 "SELECT id FROM vehicles WHERE id=?", (vehicle_id,)
@@ -215,16 +244,29 @@ class Records:
             else:
                 cursor = connection.execute(
                     """UPDATE repairs SET visit_date=?, description=?, amount_kopecks=?,
-                    completed=? WHERE id=? AND vehicle_id=?""",
-                    (*parameters, repair_id, vehicle_id),
+                    completed=?, undated_km=?, state_known=? WHERE id=? AND vehicle_id=?""",
+                    (
+                        *parameters,
+                        km if visit_date is None else None,
+                        state_known,
+                        repair_id,
+                        vehicle_id,
+                    ),
                 )
                 if cursor.rowcount != 1:
                     raise ValueError("Ремонт не найден у этого автомобиля.")
             connection.execute("DELETE FROM odometer_readings WHERE repair_id=?", (repair_id,))
-            if km is not None:
+            if km is not None and visit_date is not None:
                 connection.execute(
                     """INSERT INTO odometer_readings(vehicle_id, repair_id, recorded_on, km,
-                    verified) VALUES (?, ?, ?, ?, ?)""",
-                    (vehicle_id, repair_id, visit_date, km, int(verified)),
+                    verified,source) VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        vehicle_id,
+                        repair_id,
+                        visit_date,
+                        km,
+                        int(verified),
+                        "import" if existing and existing["origin"] == "txt" else "repair",
+                    ),
                 )
         return repair_id

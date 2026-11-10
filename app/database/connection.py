@@ -7,7 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 SCHEMA_V2 = (
     """CREATE TABLE contacts (id INTEGER PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '')""",
@@ -79,6 +79,28 @@ SCHEMA_V4 = (
     """CREATE TABLE document_files (
     document_id INTEGER PRIMARY KEY REFERENCES documents(id),
     content BLOB NOT NULL, sha256 TEXT NOT NULL)""",
+)
+
+SCHEMA_V5 = (
+    "ALTER TABLE repairs ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual'",
+    "ALTER TABLE repairs ADD COLUMN state_known INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE repairs ADD COLUMN undated_km INTEGER CHECK(undated_km >= 0)",
+    """CREATE TABLE import_sources (
+    id INTEGER PRIMARY KEY, sha256 TEXT NOT NULL UNIQUE, original_bytes BLOB NOT NULL,
+    decoded_text TEXT NOT NULL, encoding TEXT NOT NULL, original_name TEXT NOT NULL,
+    imported_at TEXT NOT NULL)""",
+    """CREATE TABLE import_paths (
+    id INTEGER PRIMARY KEY, source_id INTEGER NOT NULL REFERENCES import_sources(id),
+    source_path TEXT NOT NULL, UNIQUE(source_id, source_path))""",
+    """CREATE TABLE import_fragments (
+    id INTEGER PRIMARY KEY, source_id INTEGER NOT NULL REFERENCES import_sources(id),
+    start_offset INTEGER NOT NULL, end_offset INTEGER NOT NULL, original_text TEXT NOT NULL,
+    reviewed_json TEXT NOT NULL, repair_id INTEGER NOT NULL UNIQUE REFERENCES repairs(id),
+    vehicle_id INTEGER NOT NULL REFERENCES vehicles(id), semantic_hash TEXT NOT NULL,
+    UNIQUE(source_id, start_offset, end_offset))""",
+    "CREATE INDEX import_semantic ON import_fragments(vehicle_id, semantic_hash)",
+    """CREATE TABLE import_batches (
+    id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, report_json TEXT NOT NULL)""",
 )
 
 
@@ -158,6 +180,9 @@ def initialize_database(path: Path) -> None:
         if version < 4:
             for statement in SCHEMA_V4:
                 connection.execute(statement)
+        if version < 5:
+            for statement in SCHEMA_V5:
+                connection.execute(statement)
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         validate_tables(connection)
 
@@ -181,6 +206,13 @@ def validate_tables(connection):
         "SELECT repair_id, payload FROM document_drafts",
         "SELECT id, number, repair_id, created_at, kind, payload FROM documents",
         "SELECT document_id, content, sha256 FROM document_files",
+        "SELECT origin, state_known, undated_km FROM repairs",
+        "SELECT id, sha256, original_bytes, decoded_text, encoding, original_name, imported_at "
+        "FROM import_sources",
+        "SELECT id, source_id, source_path FROM import_paths",
+        "SELECT id, source_id, start_offset, end_offset, original_text, reviewed_json, "
+        "repair_id, vehicle_id, semantic_hash FROM import_fragments",
+        "SELECT id, created_at, report_json FROM import_batches",
     ):
         connection.execute(statement)
 

@@ -6,6 +6,7 @@ from PySide6.QtCore import QDate, Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QDateEdit,
     QDialog,
@@ -203,6 +204,12 @@ class RepairDialog(SafeDialog):
         if self.repair.get("visit_date"):
             self.visit_date.setDate(QDate.fromString(self.repair["visit_date"], "yyyy-MM-dd"))
         form.addRow("Дата", self.visit_date)
+        self.date_known = QCheckBox("Дата известна")
+        self.date_known.setChecked(bool(self.repair.get("visit_date")) if self.repair else True)
+        self.date_known.toggled.connect(self.visit_date.setEnabled)
+        self.date_known.setVisible(self.repair.get("origin") == "txt")
+        self.visit_date.setEnabled(self.date_known.isChecked())
+        form.addRow(self.date_known)
         self.mileage = QLineEdit()
         self.mileage.setMaxLength(12)
         self.mileage.setAccessibleName("Пробег, км")
@@ -215,6 +222,10 @@ class RepairDialog(SafeDialog):
         if self.repair.get("km") is not None:
             self.mileage.setText(str(self.repair["km"]))
         form.addRow("Пробег, км", self.mileage)
+        self.mileage_verified = QCheckBox("Пробег проверен")
+        self.mileage_verified.setChecked(bool(self.repair.get("verified")))
+        self.mileage_verified.setVisible(self.repair.get("origin") == "txt")
+        form.addRow(self.mileage_verified)
         self.amount = QLineEdit(amount_text(self.repair.get("amount_kopecks")))
         self.amount.setMaxLength(30)
         self.amount.setPlaceholderText("Пусто — неизвестно; 0 — бесплатно")
@@ -232,6 +243,10 @@ class RepairDialog(SafeDialog):
         self.document_button = QPushButton("Документ / Печать")
         self.document_button.clicked.connect(self.open_documents)
         row.addWidget(self.document_button)
+        if self.repair.get("origin") == "txt":
+            original_button = QPushButton("Исходный TXT")
+            original_button.clicked.connect(self.open_source)
+            row.addWidget(original_button)
         row.addStretch()
         self.save_button = QPushButton("Сохранить")
         self.save_button.clicked.connect(self.save)
@@ -245,12 +260,17 @@ class RepairDialog(SafeDialog):
         self.prepare_guard()
 
     def state(self):
-        return {
-            "visit_date": self.visit_date.date().toString("yyyy-MM-dd"),
+        values = {
+            "visit_date": self.visit_date.date().toString("yyyy-MM-dd")
+            if self.date_known.isChecked()
+            else None,
             "km": self.mileage.text(),
             "amount": self.amount.text(),
             "description": self.description.toPlainText(),
         }
+        if self.repair.get("origin") == "txt":
+            values["mileage_verified"] = self.mileage_verified.isChecked()
+        return values
 
     def save(self, checked=False, *, completed=None, close=True):
         try:
@@ -264,11 +284,16 @@ class RepairDialog(SafeDialog):
                 self.repair.get("completed", False) if completed is None else completed
             )
             allow_unverified = False
-            if values["km"] is not None and not self.records.mileage_consistent(
-                self.vehicle_id,
-                values["visit_date"],
-                values["km"],
-                self.repair.get("id"),
+            if (
+                values["km"] is not None
+                and values["visit_date"] is not None
+                and values.get("mileage_verified", True)
+                and not self.records.mileage_consistent(
+                    self.vehicle_id,
+                    values["visit_date"],
+                    values["km"],
+                    self.repair.get("id"),
+                )
             ):
                 allow_unverified = (
                     QMessageBox.question(
@@ -283,6 +308,7 @@ class RepairDialog(SafeDialog):
                 )
                 if not allow_unverified:
                     return
+                values["mileage_verified"] = False
             repair_id = self.records.save_repair(
                 self.vehicle_id,
                 values,
@@ -295,6 +321,7 @@ class RepairDialog(SafeDialog):
         self.repair = next(
             row for row in self.records.repairs(self.vehicle_id) if row["id"] == repair_id
         )
+        self.mileage_verified.setChecked(bool(self.repair["verified"]))
         self.original = self.state()
         self.finish_button.setVisible(not self.repair["completed"])
         if close:
@@ -319,6 +346,14 @@ class RepairDialog(SafeDialog):
             if not self.save(close=False):
                 return
         DocumentDialog(self.records, self.repair["id"], self).exec()
+
+    def open_source(self):
+        from app.ui.txt_import import SourceDialog
+
+        try:
+            SourceDialog(self.records.path, self.repair["id"], self).exec()
+        except ERRORS as error:
+            QMessageBox.warning(self, "Не удалось открыть источник", str(error))
 
 
 class VehicleCard(QDialog):
@@ -376,11 +411,13 @@ class VehicleCard(QDialog):
         name = " ".join(filter(None, (vehicle["make"], vehicle["model"]))) or "Автомобиль"
         self.heading.setText(f"{name} · {vehicle['plate'] or 'без госномера'}")
         latest = self.records.latest_mileage(self.vehicle_id)
+        source_name = {"maintenance": "из ТО", "import": "из TXT"}.get(
+            latest["source"] if latest else "", "из ремонта"
+        )
         mileage = (
-            f"{latest['km']:,} км · {latest['recorded_on']} · "
-            f"{'из ТО' if latest['source'] == 'maintenance' else 'из ремонта'}".replace(",", " ")
+            f"{latest['km']:,} км · {latest['recorded_on']} · {source_name}".replace(",", " ")
             if latest
-            else "Пробег пока не указан"
+            else "Нет подтверждённого замера пробега"
         )
         self.summary.setText(
             f"Контакт: {vehicle['contact_name'] or 'не указан'} · "
@@ -402,7 +439,13 @@ class VehicleCard(QDialog):
                 km,
                 repair["description"].replace("\n", " ")[:100],
                 amount_text(repair["amount_kopecks"]) or "Неизвестна",
-                "В истории" if repair["completed"] else "Текущий",
+                (
+                    "Импорт: статус не уточнён"
+                    if not repair["state_known"]
+                    else "В истории"
+                    if repair["completed"]
+                    else "Текущий"
+                ),
             )
             for column, value in enumerate(values):
                 self.history.setItem(index, column, QTableWidgetItem(value))
@@ -466,6 +509,9 @@ class VehiclesPage(QWidget):
         self.add_button = QPushButton("Добавить автомобиль")
         self.add_button.clicked.connect(self.add_vehicle)
         row.addWidget(self.add_button)
+        import_button = QPushButton("Импорт TXT")
+        import_button.clicked.connect(self.import_txt)
+        row.addWidget(import_button)
         layout.addLayout(row)
         self.table = make_table(("Автомобиль", "Госномер", "Контакт", "Телефон"))
         self.table.setAccessibleName("Автомобили")
@@ -513,6 +559,12 @@ class VehiclesPage(QWidget):
             self.refresh()
             VehicleCard(self.records, dialog.vehicle_id, self).exec()
             self.refresh()
+
+    def import_txt(self):
+        from app.ui.txt_import import ImportDialog
+
+        ImportDialog(self.records, self).exec()
+        self.refresh()
 
     def open_vehicle(self):
         row = self.table.currentRow()
