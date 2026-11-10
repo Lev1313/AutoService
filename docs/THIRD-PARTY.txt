@@ -1,0 +1,23 @@
+AutoService использует сторонние компоненты. Их права и лицензии сохраняются.
+Тексты лицензий из установленных пакетов находятся в папке licenses.
+
+Python 3.13.1 — Python Software Foundation License; https://www.python.org/
+PySide6, shiboken6 и Qt 6.12.0 — LGPL v3 / GPL / альтернативная коммерческая лицензия.
+https://doc.qt.io/qtforpython-6/licenses.html
+Исходный код привязок: https://code.qt.io/cgit/pyside/pyside-setup.git/?h=v6.12.0
+Исходный код Qt: https://download.qt.io/archive/qt/6.12/6.12.0/submodules/
+QtPdf 6.140.0 включает PDFium и другие сторонние компоненты Qt WebEngine:
+https://doc.qt.io/qt-6/qtpdf-licensing.html
+https://doc.qt.io/qt-6/qtwebengine-3rdparty-licenses.html
+Библиотеки Qt поставлены отдельно в _internal/PySide6; совместимые библиотеки
+можно заменить. AutoService не ограничивает изучение и отладку изменений этих библиотек.
+
+ReportLab 5.1.0 — BSD; https://www.reportlab.com/
+Pillow 13.0.0 — HPND; https://python-pillow.org/
+charset-normalizer 3.5.2 — MIT; https://github.com/jawah/charset_normalizer
+Системные шрифты Arial используются из Windows и не включены в этот пакет.
+PyInstaller 6.22.3 использован для сборки (GPL с исключением для загрузчика).
+https://pyinstaller.org/en/stable/license.html
+Inno Setup 7.1.1 использован для установщика: https://jrsoftware.org/isinfo.php
+
+Материалы разработки и инструкция повторной сборки хранятся в проекте AutoService.

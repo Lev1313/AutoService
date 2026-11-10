@@ -23,6 +23,7 @@ from app.database.connection import backup_database, restore_database
 from app.services.records import Records
 from app.ui.maintenance import CallsPage
 from app.ui.vehicles import VehiclesPage
+from app.version import VERSION
 
 SECTIONS = ("Главная", "Автомобили", "Календарь", "Финансы", "Настройки")
 
@@ -137,7 +138,9 @@ class MainWindow(QMainWindow):
         self.navigation.currentRowChanged.connect(self.refresh_page)
         self.navigation.setCurrentRow(0)
         self.navigation.setFocus()
-        self.statusBar().showMessage("Готово  ·  Разделы: Ctrl+1…5  ·  Навигация: Tab и стрелки")
+        self.statusBar().showMessage(
+            f"Версия {VERSION} · Пилот  ·  Разделы: Ctrl+1…5  ·  Навигация: Tab и стрелки"
+        )
         for index in range(len(SECTIONS)):
             shortcut = QShortcut(QKeySequence(f"Ctrl+{index + 1}"), self)
             shortcut.activated.connect(lambda row=index: self.navigation.setCurrentRow(row))
