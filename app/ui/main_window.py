@@ -1,23 +1,27 @@
-"""Навигация первого этапа. Демонстрационные записи не сохраняются в базу."""
+"""Навигация, автомобили и резервное копирование."""
 
+import sqlite3
 from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QAbstractItemView,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QListWidget,
     QMainWindow,
+    QMessageBox,
+    QPushButton,
     QStackedWidget,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
+
+from app.database.connection import backup_database, restore_database
+from app.services.records import Records
+from app.ui.vehicles import VehiclesPage
 
 SECTIONS = ("Главная", "Автомобили", "Календарь", "Финансы", "Настройки")
 
@@ -76,11 +80,17 @@ class MainWindow(QMainWindow):
         self.navigation.addItems(SECTIONS)
         side_layout.addWidget(self.navigation)
         side_layout.addWidget(label("Локально · Без интернета", "muted"))
-        side_layout.addWidget(label("Этап 1 · Каркас приложения", "muted"))
+        side_layout.addWidget(label("Автомобили и ремонты", "muted"))
         layout.addWidget(sidebar)
 
         self.pages = QStackedWidget()
+        self.db_path = db_path
+        self.records = Records(db_path)
+        self.vehicles_page = VehiclesPage(self.records)
         for name in SECTIONS:
+            if name == "Автомобили":
+                self.pages.addWidget(self.vehicles_page)
+                continue
             page = QWidget()
             content = QVBoxLayout(page)
             content.setContentsMargins(32, 30, 32, 24)
@@ -90,46 +100,19 @@ class MainWindow(QMainWindow):
                 content.addWidget(label("Всё начинается с автомобиля", "badge"))
                 content.addWidget(
                     label(
-                        "Среда разработки готова к первому этапу. Выберите раздел слева.",
+                        "Найдите автомобиль или добавьте новый, затем запишите ремонт.",
                         "muted",
                         True,
                     )
                 )
                 content.addWidget(
                     label(
-                        "История ремонтов, напоминания о звонках и запись на обслуживание "
-                        "будут реализованы позже.",
+                        "Автомобили и история ремонтов сохраняются на этом компьютере. "
+                        "Календарь ТО и документы — следующие этапы.",
                         "",
                         True,
                     )
                 )
-            elif name == "Автомобили":
-                content.addWidget(
-                    label(
-                        "Демонстрационные данные — вымышленные автомобили. "
-                        "Добавление и редактирование будут реализованы позже.",
-                        "badge",
-                        True,
-                    )
-                )
-                table = QTableWidget(3, 4)
-                table.setAccessibleName("Демонстрационные автомобили")
-                table.setHorizontalHeaderLabels(("Автомобиль", "Год", "Пробег, км", "Тип записи"))
-                rows = (
-                    ("Лада Веста", "2020", "82 000", "Демонстрация"),
-                    ("Киа Рио", "2018", "115 000", "Демонстрация"),
-                    ("Рено Логан", "2016", "164 000", "Демонстрация"),
-                )
-                for row, values in enumerate(rows):
-                    for column, value in enumerate(values):
-                        table.setItem(row, column, QTableWidgetItem(value))
-                table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-                table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-                table.setAlternatingRowColors(True)
-                table.verticalHeader().hide()
-                table.verticalHeader().setDefaultSectionSize(38)
-                table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-                content.addWidget(table, 1)
             elif name == "Настройки":
                 content.addWidget(label("Хранение данных", "badge"))
                 path_label = label(str(db_path), "", True)
@@ -137,16 +120,22 @@ class MainWindow(QMainWindow):
                 content.addWidget(path_label)
                 content.addWidget(
                     label(
-                        "База SQLite хранится отдельно от программы. "
-                        "Настройки и резервное копирование будут реализованы позже.",
+                        "Создайте резервную копию на другом диске или флешке. "
+                        "Перед восстановлением программа сохранит текущую базу отдельно.",
                         "muted",
                         True,
                     )
                 )
+                backup_button = QPushButton("Создать резервную копию")
+                backup_button.clicked.connect(self.create_backup)
+                content.addWidget(backup_button)
+                restore_button = QPushButton("Восстановить из копии")
+                restore_button.clicked.connect(self.restore_backup)
+                content.addWidget(restore_button)
             else:
                 content.addWidget(label("Будет реализовано позже", "badge"))
                 description = (
-                    "Здесь появится запись автомобилей на ремонт."
+                    "Здесь появятся напоминания о звонках для приглашения на ТО."
                     if name == "Календарь"
                     else "Здесь появится учёт полученных платежей, частичных оплат и расходов."
                 )
@@ -163,3 +152,54 @@ class MainWindow(QMainWindow):
         for index in range(len(SECTIONS)):
             shortcut = QShortcut(QKeySequence(f"Ctrl+{index + 1}"), self)
             shortcut.activated.connect(lambda row=index: self.navigation.setCurrentRow(row))
+        search_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
+        search_shortcut.activated.connect(self.focus_search)
+
+    def focus_search(self):
+        self.navigation.setCurrentRow(1)
+        self.vehicles_page.search.setFocus()
+        self.vehicles_page.search.selectAll()
+
+    def create_backup(self):
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Сохранить резервную копию",
+            "AutoService-copy.sqlite3",
+            "База AutoService (*.sqlite3)",
+        )
+        if not filename:
+            return
+        try:
+            backup_database(self.db_path, Path(filename))
+        except (OSError, ValueError, RuntimeError, sqlite3.Error) as error:
+            QMessageBox.warning(self, "Не удалось создать копию", str(error))
+            return
+        QMessageBox.information(self, "Резервная копия готова", filename)
+
+    def restore_backup(self):
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Выбрать резервную копию", "", "База AutoService (*.sqlite3)"
+        )
+        if not filename:
+            return
+        if (
+            QMessageBox.question(
+                self,
+                "Восстановить данные?",
+                "Текущие данные будут заменены данными из выбранной копии. "
+                "Перед заменой программа сохранит текущую базу. Продолжить?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+        try:
+            safety_copy = restore_database(self.db_path, Path(filename))
+        except (OSError, ValueError, RuntimeError) as error:
+            QMessageBox.warning(self, "Не удалось восстановить данные", str(error))
+            return
+        self.vehicles_page.refresh()
+        QMessageBox.information(
+            self, "Данные восстановлены", f"Предыдущие данные сохранены здесь:\n{safety_copy}"
+        )

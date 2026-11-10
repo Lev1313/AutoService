@@ -50,7 +50,14 @@ def test_window_and_navigation(application, tmp_path):
         QTest.keyClick(window.navigation, Qt.Key.Key_Down)
         assert window.pages.currentIndex() == 1
         table = window.pages.widget(1).findChild(QTableWidget)
-        assert table.rowCount() == 3
-        assert table.item(0, 3).text() == "Демонстрация"
+        assert table.rowCount() == 0
+        window.records.save_vehicle({"make": "Лада", "plate": "ТЕСТ 123"})
+        window.vehicles_page.refresh()
+        assert table.rowCount() == 1
+        assert table.item(0, 0).text() == "Лада"
+        window.vehicles_page.search.setText("тест123")
+        assert table.rowCount() == 1
+        window.vehicles_page.search.setText("Несуществующий")
+        assert table.rowCount() == 0
     finally:
         window.close()

@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QLocale
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app.database.connection import initialize_database
@@ -19,6 +20,27 @@ def create_application(argv: list[str] | None = None) -> QApplication:
     application.setApplicationName("AutoService")
     application.setOrganizationName("AutoService")
     application.setStyle("Fusion")
+    palette = QPalette()
+    for role, color in {
+        QPalette.ColorRole.Window: "#f5f7fa",
+        QPalette.ColorRole.WindowText: "#243247",
+        QPalette.ColorRole.Base: "#ffffff",
+        QPalette.ColorRole.AlternateBase: "#f8fafc",
+        QPalette.ColorRole.ToolTipBase: "#ffffff",
+        QPalette.ColorRole.ToolTipText: "#243247",
+        QPalette.ColorRole.Text: "#243247",
+        QPalette.ColorRole.Button: "#edf1f7",
+        QPalette.ColorRole.ButtonText: "#243247",
+        QPalette.ColorRole.BrightText: "#ffffff",
+        QPalette.ColorRole.Highlight: "#175cd3",
+        QPalette.ColorRole.HighlightedText: "#ffffff",
+        QPalette.ColorRole.PlaceholderText: "#596980",
+        QPalette.ColorRole.Link: "#175cd3",
+    }.items():
+        palette.setColor(role, QColor(color))
+    for role in (QPalette.ColorRole.Text, QPalette.ColorRole.ButtonText):
+        palette.setColor(QPalette.ColorGroup.Disabled, role, QColor("#768398"))
+    application.setPalette(palette)
     QLocale.setDefault(QLocale(QLocale.Language.Russian, QLocale.Country.Russia))
     return application
 
