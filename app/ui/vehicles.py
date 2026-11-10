@@ -311,6 +311,9 @@ class VehicleCard(QDialog):
         self.edit_button = QPushButton("Изменить автомобиль")
         self.edit_button.clicked.connect(self.edit_vehicle)
         row.addWidget(self.edit_button)
+        maintenance_button = QPushButton("ТО и напоминания")
+        maintenance_button.clicked.connect(self.open_maintenance)
+        row.addWidget(maintenance_button)
         row.addStretch()
         self.add_repair_button = QPushButton("Добавить ремонт")
         self.add_repair_button.clicked.connect(self.add_repair)
@@ -342,7 +345,8 @@ class VehicleCard(QDialog):
         self.heading.setText(f"{name} · {vehicle['plate'] or 'без госномера'}")
         latest = self.records.latest_mileage(self.vehicle_id)
         mileage = (
-            f"{latest['km']:,} км · {latest['recorded_on']} · из ремонта".replace(",", " ")
+            f"{latest['km']:,} км · {latest['recorded_on']} · "
+            f"{'из ТО' if latest['source'] == 'maintenance' else 'из ремонта'}".replace(",", " ")
             if latest
             else "Пробег пока не указан"
         )
@@ -373,6 +377,7 @@ class VehicleCard(QDialog):
         self.open_button.setEnabled(bool(self.rows))
         if self.rows:
             self.history.selectRow(0)
+            self.show_description()
 
     def show_description(self):
         row = self.history.currentRow()
@@ -383,6 +388,12 @@ class VehicleCard(QDialog):
     def edit_vehicle(self):
         if VehicleDialog(self.records, self.vehicle_id, self).exec():
             self.refresh()
+
+    def open_maintenance(self):
+        from app.ui.maintenance import PlansDialog
+
+        PlansDialog(self.records, self.vehicle_id, self).exec()
+        self.refresh()
 
     def add_repair(self):
         if RepairDialog(self.records, self.vehicle_id, parent=self).exec():

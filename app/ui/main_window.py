@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from app.database.connection import backup_database, restore_database
 from app.services.records import Records
+from app.ui.maintenance import CallsPage
 from app.ui.vehicles import VehiclesPage
 
 SECTIONS = ("Главная", "Автомобили", "Календарь", "Финансы", "Настройки")
@@ -80,40 +81,28 @@ class MainWindow(QMainWindow):
         self.navigation.addItems(SECTIONS)
         side_layout.addWidget(self.navigation)
         side_layout.addWidget(label("Локально · Без интернета", "muted"))
-        side_layout.addWidget(label("Автомобили и ремонты", "muted"))
+        side_layout.addWidget(label("Автомобили · Ремонты · ТО", "muted"))
         layout.addWidget(sidebar)
 
         self.pages = QStackedWidget()
         self.db_path = db_path
         self.records = Records(db_path)
         self.vehicles_page = VehiclesPage(self.records)
+        self.calls_page = CallsPage(self.records)
+        self.dashboard = CallsPage(self.records, "Сегодня и просроченные звонки")
         for name in SECTIONS:
             if name == "Автомобили":
                 self.pages.addWidget(self.vehicles_page)
+                continue
+            if name in ("Главная", "Календарь"):
+                self.pages.addWidget(self.dashboard if name == "Главная" else self.calls_page)
                 continue
             page = QWidget()
             content = QVBoxLayout(page)
             content.setContentsMargins(32, 30, 32, 24)
             content.setSpacing(18)
             content.addWidget(label(name, "title"))
-            if name == "Главная":
-                content.addWidget(label("Всё начинается с автомобиля", "badge"))
-                content.addWidget(
-                    label(
-                        "Найдите автомобиль или добавьте новый, затем запишите ремонт.",
-                        "muted",
-                        True,
-                    )
-                )
-                content.addWidget(
-                    label(
-                        "Автомобили и история ремонтов сохраняются на этом компьютере. "
-                        "Календарь ТО и документы — следующие этапы.",
-                        "",
-                        True,
-                    )
-                )
-            elif name == "Настройки":
+            if name == "Настройки":
                 content.addWidget(label("Хранение данных", "badge"))
                 path_label = label(str(db_path), "", True)
                 path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -134,11 +123,7 @@ class MainWindow(QMainWindow):
                 content.addWidget(restore_button)
             else:
                 content.addWidget(label("Будет реализовано позже", "badge"))
-                description = (
-                    "Здесь появятся напоминания о звонках для приглашения на ТО."
-                    if name == "Календарь"
-                    else "Здесь появится учёт полученных платежей, частичных оплат и расходов."
-                )
+                description = "Финансовый учёт отложен до отдельного согласования."
                 content.addWidget(label(description, "muted", True))
             if name != "Автомобили":
                 content.addStretch()
@@ -146,6 +131,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.pages, 1)
         self.setCentralWidget(root)
         self.navigation.currentRowChanged.connect(self.pages.setCurrentIndex)
+        self.navigation.currentRowChanged.connect(self.refresh_page)
         self.navigation.setCurrentRow(0)
         self.navigation.setFocus()
         self.statusBar().showMessage("Готово  ·  Разделы: Ctrl+1…5  ·  Навигация: Tab и стрелки")
@@ -154,6 +140,12 @@ class MainWindow(QMainWindow):
             shortcut.activated.connect(lambda row=index: self.navigation.setCurrentRow(row))
         search_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
         search_shortcut.activated.connect(self.focus_search)
+
+    def refresh_page(self, index):
+        if index == 0:
+            self.dashboard.refresh()
+        elif index == 2:
+            self.calls_page.refresh()
 
     def focus_search(self):
         self.navigation.setCurrentRow(1)

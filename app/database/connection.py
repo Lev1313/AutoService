@@ -4,9 +4,10 @@ import sqlite3
 from contextlib import closing, contextmanager
 from datetime import datetime
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from uuid import uuid4
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 SCHEMA_V2 = (
     """CREATE TABLE contacts (id INTEGER PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '')""",
@@ -30,6 +31,40 @@ SCHEMA_V2 = (
     verified INTEGER NOT NULL DEFAULT 1 CHECK(verified IN (0, 1)))""",
     "CREATE INDEX repairs_vehicle_date ON repairs(vehicle_id, visit_date DESC, id DESC)",
     "CREATE INDEX odometer_vehicle_date ON odometer_readings(vehicle_id, recorded_on DESC)",
+)
+
+SCHEMA_V3 = (
+    """CREATE TABLE maintenance_plans (
+    id INTEGER PRIMARY KEY, vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),
+    title TEXT NOT NULL, months INTEGER CHECK(months > 0),
+    distance_km INTEGER CHECK(distance_km > 0),
+    lead_days INTEGER NOT NULL DEFAULT 0 CHECK(lead_days >= 0),
+    annual_km INTEGER CHECK(annual_km > 0), baseline_date TEXT, baseline_km INTEGER,
+    cycle_no INTEGER NOT NULL DEFAULT 1, enabled INTEGER NOT NULL DEFAULT 1,
+    CHECK(months IS NOT NULL OR distance_km IS NOT NULL))""",
+    """CREATE TABLE maintenance_events (
+    id INTEGER PRIMARY KEY, plan_id INTEGER NOT NULL REFERENCES maintenance_plans(id),
+    performed_on TEXT NOT NULL, km INTEGER CHECK(km >= 0),
+    repair_id INTEGER REFERENCES repairs(id), note TEXT NOT NULL DEFAULT '')""",
+    """CREATE UNIQUE INDEX maintenance_event_repair ON maintenance_events(plan_id, repair_id)
+    WHERE repair_id IS NOT NULL""",
+    "ALTER TABLE odometer_readings ADD COLUMN maintenance_event_id INTEGER "
+    "REFERENCES maintenance_events(id)",
+    "CREATE UNIQUE INDEX odometer_event ON odometer_readings(maintenance_event_id) "
+    "WHERE maintenance_event_id IS NOT NULL",
+    """CREATE TABLE call_tasks (
+    id INTEGER PRIMARY KEY, plan_id INTEGER NOT NULL REFERENCES maintenance_plans(id),
+    cycle_no INTEGER NOT NULL, calculated_date TEXT, manual_date TEXT,
+    details TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'open'
+    CHECK(status IN ('open','contacted','completed','declined')),
+    UNIQUE(plan_id, cycle_no))""",
+    """CREATE TABLE call_attempts (
+    id INTEGER PRIMARY KEY, task_id INTEGER NOT NULL REFERENCES call_tasks(id),
+    attempted_at TEXT NOT NULL, outcome TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '', next_date TEXT)""",
+    """CREATE TABLE vehicle_call_preferences (
+    vehicle_id INTEGER PRIMARY KEY REFERENCES vehicles(id),
+    allow_calls INTEGER NOT NULL DEFAULT 1 CHECK(allow_calls IN (0,1)))""",
 )
 
 
@@ -97,11 +132,14 @@ def initialize_database(path: Path) -> None:
             ).fetchone()
             if identity is None or identity[0] != "AutoService":
                 raise RuntimeError("База не распознана как AutoService. Данные не изменены.")
-        if version == 1:
+        if 0 < version < SCHEMA_VERSION:
             # BEGIN IMMEDIATE защищает исходный снимок от других писателей.
             backup_database(path)
         if version < 2:
             for statement in SCHEMA_V2:
+                connection.execute(statement)
+        if version < 3:
+            for statement in SCHEMA_V3:
                 connection.execute(statement)
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         validate_tables(connection)
@@ -115,6 +153,13 @@ def validate_tables(connection):
         "SELECT id, vehicle_id, visit_date, description, amount_kopecks, completed FROM repairs",
         "SELECT id, vehicle_id, repair_id, recorded_on, km, source, verified "
         "FROM odometer_readings",
+        "SELECT id, vehicle_id, title, months, distance_km, lead_days, annual_km, "
+        "baseline_date, baseline_km, cycle_no, enabled FROM maintenance_plans",
+        "SELECT id, plan_id, performed_on, km, repair_id, note FROM maintenance_events",
+        "SELECT id, plan_id, cycle_no, calculated_date, manual_date, details, status "
+        "FROM call_tasks",
+        "SELECT id, task_id, attempted_at, outcome, note, next_date FROM call_attempts",
+        "SELECT vehicle_id, allow_calls FROM vehicle_call_preferences",
     ):
         connection.execute(statement)
 
@@ -133,8 +178,17 @@ def restore_database(path: Path, source_path: Path) -> Path:
                 "SELECT value FROM app_metadata WHERE key='application'"
             ).fetchone()
             version = source.execute("PRAGMA user_version").fetchone()[0]
-            if identity != ("AutoService",) or version != SCHEMA_VERSION:
-                raise ValueError("Нужна резервная копия AutoService текущей версии.")
+            if identity != ("AutoService",) or not 1 <= version <= SCHEMA_VERSION:
+                raise ValueError("Нужна совместимая резервная копия AutoService.")
+            if version < SCHEMA_VERSION:
+                # Проверяем и обновляем старую копию в отдельном временном каталоге.
+                # Исходная копия и текущая база до успешной миграции не меняются.
+                with TemporaryDirectory(prefix="restore-preview-", dir=path.parent) as directory:
+                    prepared = Path(directory) / "prepared.sqlite3"
+                    with closing(sqlite3.connect(prepared)) as staged:
+                        source.backup(staged)
+                    initialize_database(prepared)
+                    return restore_database(path, prepared)
             # Проверяем поля, нужные приложению, до замены текущих данных.
             validate_tables(source)
             if source.execute("PRAGMA foreign_key_check").fetchone() is not None:
