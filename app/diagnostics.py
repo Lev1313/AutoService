@@ -177,11 +177,16 @@ def reopen(root, report):
                 connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok",
                 "Целостность базы",
             )
+        check(
+            window.pages.currentWidget() is window.vehicles_page, "Стартовая страница автомобилей"
+        )
+        check(window.navigation.item(1).text() == "Звонки", "Раздел звонков ниже автомобилей")
+        check(window.grab().save(str(root / "startup-window.png")), "Снимок стартовой страницы")
         for index in range(window.navigation.count()):
             window.navigation.setCurrentRow(index)
             application.processEvents()
             check(window.pages.currentIndex() == index, "Переключение раздела")
-        window.navigation.setCurrentRow(1)
+        window.navigation.setCurrentRow(window.pages.indexOf(window.vehicles_page))
         window.vehicles_page.search.setText("тестпилот")
         QTest.qWait(350)
         check(window.vehicles_page.table.rowCount() == 1, "Поиск в собранном интерфейсе")

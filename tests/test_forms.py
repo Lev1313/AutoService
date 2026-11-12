@@ -111,7 +111,7 @@ def test_ctrl_f_and_ctrl_s(application, records):
     window.activateWindow()
     application.processEvents()
     QTest.keyClick(window, Qt.Key.Key_F, Qt.KeyboardModifier.ControlModifier)
-    assert window.pages.currentIndex() == 1
+    assert window.pages.currentWidget() is window.vehicles_page
     assert window.vehicles_page.search.hasFocus()
     car = records.save_vehicle({"plate": "ТЕСТ"})
     editor = RepairDialog(records, car, parent=window)

@@ -4,7 +4,6 @@ import sys
 
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QTableWidget
 
 from app.bootstrap import create_window
 from app.services.paths import data_directory, database_path
@@ -39,6 +38,7 @@ def test_window_and_navigation(application, tmp_path):
         window.show()
         application.processEvents()
         assert window.isVisible()
+        assert window.pages.currentWidget() is window.vehicles_page
         assert window.navigation.count() == len(SECTIONS)
         for index in range(len(SECTIONS)):
             window.navigation.setCurrentRow(index)
@@ -46,10 +46,14 @@ def test_window_and_navigation(application, tmp_path):
             assert window.pages.currentIndex() == index
         window.navigation.setFocus()
         QTest.keyClick(window.navigation, Qt.Key.Key_Home)
-        assert window.pages.currentIndex() == 0
+        assert window.pages.currentWidget() is window.vehicles_page
         QTest.keyClick(window.navigation, Qt.Key.Key_Down)
         assert window.pages.currentIndex() == 1
-        table = window.pages.widget(1).findChild(QTableWidget)
+        assert window.pages.currentWidget() is window.dashboard
+        assert window.navigation.currentItem().text() == "Звонки"
+        window.focus_search()
+        assert window.pages.currentWidget() is window.vehicles_page
+        table = window.vehicles_page.table
         assert table.rowCount() == 0
         window.records.save_vehicle({"make": "Лада", "plate": "ТЕСТ 123"})
         window.vehicles_page.refresh()

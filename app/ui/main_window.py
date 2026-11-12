@@ -25,7 +25,7 @@ from app.ui.maintenance import CallsPage
 from app.ui.vehicles import VehiclesPage
 from app.version import VERSION
 
-SECTIONS = ("Главная", "Автомобили", "Календарь", "Финансы", "Настройки")
+SECTIONS = ("Автомобили", "Звонки", "Календарь", "Финансы", "Настройки")
 
 STYLESHEET = """
 QWidget { color: #243247; font-family: 'Segoe UI'; font-size: 10pt; }
@@ -90,13 +90,13 @@ class MainWindow(QMainWindow):
         self.records = Records(db_path)
         self.vehicles_page = VehiclesPage(self.records)
         self.calls_page = CallsPage(self.records)
-        self.dashboard = CallsPage(self.records, "Сегодня и просроченные звонки")
+        self.dashboard = CallsPage(self.records, "Звонки")
         for name in SECTIONS:
             if name == "Автомобили":
                 self.pages.addWidget(self.vehicles_page)
                 continue
-            if name in ("Главная", "Календарь"):
-                self.pages.addWidget(self.dashboard if name == "Главная" else self.calls_page)
+            if name in ("Звонки", "Календарь"):
+                self.pages.addWidget(self.dashboard if name == "Звонки" else self.calls_page)
                 continue
             page = QWidget()
             content = QVBoxLayout(page)
@@ -148,13 +148,14 @@ class MainWindow(QMainWindow):
         search_shortcut.activated.connect(self.focus_search)
 
     def refresh_page(self, index):
-        if index == 0:
+        page = self.pages.widget(index)
+        if page is self.dashboard:
             self.dashboard.refresh()
-        elif index == 2:
+        elif page is self.calls_page:
             self.calls_page.refresh()
 
     def focus_search(self):
-        self.navigation.setCurrentRow(1)
+        self.navigation.setCurrentRow(self.pages.indexOf(self.vehicles_page))
         self.vehicles_page.search.setFocus()
         self.vehicles_page.search.selectAll()
 
