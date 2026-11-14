@@ -28,6 +28,7 @@ from app.database.connection import (
     initialize_database,
     restore_database,
 )
+from app.services.catalog import VehicleCatalog
 from app.services.documents import Documents
 from app.services.maintenance import Maintenance
 from app.services.records import Records
@@ -130,6 +131,16 @@ def prepare(root):
     )
     check(source_path.read_bytes() == raw, "Оригинал TXT изменён")
 
+    customer_id = records.vehicle(car)["contact_id"]
+    records.save_contact(
+        {"name": "Вымышленный клиент (исправлен)", "phone": "000-000"}, customer_id
+    )
+    standalone_customer = records.save_contact(
+        {"name": "Клиент без машины (тест)", "phone": "000-999"}
+    )
+    check(records.find_contacts("000000")[0]["vehicle_count"] == 1, "Общий список клиентов")
+    check("Volkswagen" in VehicleCatalog(records).makes(), "Встроенные марки")
+    check("Golf" in VehicleCatalog(records).models("VW"), "Встроенные модели")
     backup = backup_database(path, root / "release-backup.sqlite3")
     records.save_vehicle(records.vehicle(car) | {"plate": "ИЗМЕНЕНО-ДЛЯ-ТЕСТА"}, car)
     restore_database(path, backup)
@@ -141,6 +152,8 @@ def prepare(root):
         "version": VERSION,
         "frozen": bool(getattr(sys, "frozen", False)),
         "car": car,
+        "customer_id": customer_id,
+        "standalone_customer": standalone_customer,
         "repair": repair,
         "documents": [simple["id"], detailed["id"]],
         "imported_repair": imported["repair_id"],
@@ -163,6 +176,19 @@ def reopen(root, report):
         )
         task = Maintenance(path).tasks(date(2026, 8, 1))[0]
         check(task["manual_date"] == "2026-12-01", "Повторный запуск: перенос звонка")
+        check(
+            records.contact(report["customer_id"])["name"] == "Вымышленный клиент (исправлен)",
+            "Повторный запуск: изменение общего клиента",
+        )
+        check(
+            records.contact(report["standalone_customer"])["name"] == "Клиент без машины (тест)",
+            "Повторный запуск: клиент без машины",
+        )
+        check(
+            records.vehicle(report["car"])["contact_id"] == report["customer_id"],
+            "Связь клиента и машины",
+        )
+        check("Golf" in VehicleCatalog(records).models("Volkswagen"), "Справочник внутри EXE")
         documents = Documents(path)
         content = documents.pdf_content(report["documents"][1])
         check(sha256(content).hexdigest() == report["pdf_sha256"], "Повторный запуск: PDF")
@@ -180,12 +206,19 @@ def reopen(root, report):
         check(
             window.pages.currentWidget() is window.vehicles_page, "Стартовая страница автомобилей"
         )
-        check(window.navigation.item(1).text() == "Звонки", "Раздел звонков ниже автомобилей")
+        check(window.navigation.item(1).text() == "Клиенты", "Раздел клиентов после автомобилей")
+        check(window.navigation.item(2).text() == "Звонки", "Раздел звонков после клиентов")
         check(window.grab().save(str(root / "startup-window.png")), "Снимок стартовой страницы")
         for index in range(window.navigation.count()):
             window.navigation.setCurrentRow(index)
             application.processEvents()
             check(window.pages.currentIndex() == index, "Переключение раздела")
+        window.navigation.setCurrentRow(window.pages.indexOf(window.customers_page))
+        window.customers_page.search.setText("000000")
+        QTest.qWait(200)
+        check(window.customers_page.table.rowCount() == 1, "Поиск клиентов в EXE")
+        check(window.customers_page.rows[0]["id"] == report["customer_id"], "Клиент из общей базы")
+        check(window.grab().save(str(root / "customers-window.png")), "Снимок клиентов")
         window.navigation.setCurrentRow(window.pages.indexOf(window.vehicles_page))
         window.vehicles_page.search.setText("тестпилот")
         QTest.qWait(350)

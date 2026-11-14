@@ -21,3 +21,11 @@ https://pyinstaller.org/en/stable/license.html
 Inno Setup 7.1.1 использован для установщика: https://jrsoftware.org/isinfo.php
 
 Материалы разработки и инструкция повторной сборки хранятся в проекте AutoService.
+
+
+Офлайн-справочник марок и моделей: Global Car Models, MIT.
+Copyright (c) 2025 Global Car Models.
+https://github.com/serhatkildaci/global-car-models
+Снимок 44da5c9e5e0f3162d65579033f7a641473308b11: 94 марки, 1829 исходных названий моделей.
+Каталог и неизменённый текст MIT-лицензии: _internal/app/assets.
+Введённые владельцем названия остаются его локальными данными и в справочник не отправляются.

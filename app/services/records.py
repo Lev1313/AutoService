@@ -42,6 +42,71 @@ class Records:
         with connect(self.path) as connection:
             return [dict(row) for row in connection.execute("SELECT * FROM contacts ORDER BY name")]
 
+    def contact(self, contact_id):
+        with connect(self.path) as connection:
+            row = connection.execute("SELECT * FROM contacts WHERE id=?", (contact_id,)).fetchone()
+        if row is None:
+            raise ValueError("Клиент не найден.")
+        return dict(row)
+
+    def find_contacts(self, query=""):
+        with connect(self.path) as connection:
+            rows = connection.execute(
+                """SELECT c.*, (SELECT COUNT(*) FROM vehicles v
+                WHERE v.contact_id=c.id AND v.archived=0) AS vehicle_count
+                FROM contacts c ORDER BY c.name COLLATE NOCASE, c.id"""
+            ).fetchall()
+        return [
+            dict(row)
+            for row in rows
+            if all(
+                any(search_key(word) in search_key(row[field] or "") for field in ("name", "phone"))
+                for word in query.split()
+            )
+        ]
+
+    def contact_duplicates(self, name, phone, exclude_id=None):
+        name, phone = search_key(name), search_key(phone)
+        return [
+            row
+            for row in self.contacts()
+            if row["id"] != exclude_id
+            and (
+                (phone and search_key(row["phone"]) == phone)
+                or (not phone and name and not row["phone"] and search_key(row["name"]) == name)
+            )
+        ]
+
+    def save_contact(self, values, contact_id=None):
+        name, phone = (str(values.get(key, "")).strip() for key in ("name", "phone"))
+        if not name and not phone:
+            raise ValueError("Укажите имя или телефон клиента.")
+        if len(name) > 200 or len(phone) > 200:
+            raise ValueError("Имя и телефон: не более 200 символов в каждом поле.")
+        with connect(self.path) as connection:
+            if contact_id is None:
+                return connection.execute(
+                    "INSERT INTO contacts(name, phone) VALUES (?,?)", (name, phone)
+                ).lastrowid
+            cursor = connection.execute(
+                "UPDATE contacts SET name=?, phone=? WHERE id=?", (name, phone, contact_id)
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("Клиент не найден.")
+        return contact_id
+
+    def contact_vehicles(self, contact_id, include_archived=False):
+        rows = self.vehicles()
+        if include_archived:
+            rows += self.vehicles(archived=True)
+        return [row for row in rows if row["contact_id"] == contact_id]
+
+    def vehicle_names(self):
+        with connect(self.path) as connection:
+            return [
+                dict(row) for row in connection.execute("SELECT DISTINCT make,model FROM vehicles")
+            ]
+
     def vehicles(self, query: str = "", archived: bool = False):
         with connect(self.path) as connection:
             rows = connection.execute(

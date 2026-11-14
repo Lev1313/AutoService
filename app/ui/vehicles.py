@@ -2,12 +2,13 @@
 
 import sqlite3
 
-from PySide6.QtCore import QDate, Qt
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import QDate, QModelIndex, QStringListModel, Qt
+from PySide6.QtGui import QKeySequence, QShortcut, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QCompleter,
     QDateEdit,
     QDialog,
     QFormLayout,
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.services.catalog import VehicleCatalog
 from app.services.records import Records, amount_text, parse_amount, search_key
 
 ERRORS = (ValueError, OSError, sqlite3.Error)
@@ -76,8 +78,15 @@ class SafeDialog(QDialog):
         super().reject()
 
 
+class ContactCompleter(QCompleter):
+    """В списке показываем имя и телефон, в поле вставляем только его значение."""
+
+    def pathFromIndex(self, index):
+        return index.data(Qt.ItemDataRole.UserRole + 1) or ""
+
+
 class VehicleDialog(SafeDialog):
-    def __init__(self, records: Records, vehicle_id=None, parent=None):
+    def __init__(self, records: Records, vehicle_id=None, parent=None, *, contact_id=None):
         super().__init__(parent)
         self.records = records
         self.vehicle_id = vehicle_id
@@ -100,15 +109,15 @@ class VehicleDialog(SafeDialog):
             self.fields[key] = field
             form.addRow(title, field)
         self.contacts = QComboBox()
-        self.contacts.addItem("Новый контакт / без контакта", None)
+        self.contacts.addItem("Новый клиент / без клиента", None)
         self.contact_rows = records.contacts()
         for contact in self.contact_rows:
             self.contacts.addItem(
                 f"{contact['name'] or 'Без имени'} · {contact['phone'] or 'нет телефона'}",
                 contact["id"],
             )
-        form.addRow("Выбрать контакт", self.contacts)
-        for key, title in (("contact_name", "Контакт"), ("phone", "Телефон")):
+        form.addRow("Выбрать клиента", self.contacts)
+        for key, title in (("contact_name", "Клиент"), ("phone", "Телефон")):
             self.fields[key] = QLineEdit()
             self.fields[key].setMaxLength(200)
             form.addRow(title, self.fields[key])
@@ -124,6 +133,12 @@ class VehicleDialog(SafeDialog):
             for key, field in self.fields.items():
                 field.setText(str(vehicle[key]) if vehicle[key] is not None else "")
             self.notes.setPlainText(vehicle["notes"])
+        elif contact_id is not None:
+            row = self.contacts.findData(contact_id)
+            if row < 0:
+                raise ValueError("Клиент не найден.")
+            self.contacts.setCurrentIndex(row)
+        self.setup_suggestions()
         row = QHBoxLayout()
         row.addStretch()
         cancel = QPushButton("Отмена")
@@ -135,6 +150,54 @@ class VehicleDialog(SafeDialog):
         row.addWidget(self.save_button)
         layout.addLayout(row)
         self.prepare_guard()
+
+    def setup_suggestions(self):
+        self.catalog = VehicleCatalog(self.records)
+        self.make_completer = QCompleter(self.catalog.makes(), self)
+        self.fields["make"].setCompleter(self.make_completer)
+        self.model_suggestions = QStringListModel(self)
+        self.model_completer = QCompleter(self.model_suggestions, self)
+        self.fields["model"].setCompleter(self.model_completer)
+        self.fields["make"].textChanged.connect(self.update_models)
+        self.update_models()
+        completers = [self.make_completer, self.model_completer]
+        self.contact_completers = {}
+        for key in ("contact_name", "phone"):
+            model = QStandardItemModel(self)
+            for contact in self.contact_rows:
+                values = (contact["name"] or "Без имени", contact["phone"] or "нет телефона")
+                if key == "phone":
+                    values = values[::-1]
+                item = QStandardItem(" · ".join(values))
+                item.setData(contact["id"], Qt.ItemDataRole.UserRole)
+                item.setData(
+                    contact["name" if key == "contact_name" else "phone"],
+                    Qt.ItemDataRole.UserRole + 1,
+                )
+                model.appendRow(item)
+            completer = ContactCompleter(model, self)
+            completer.activated[QModelIndex].connect(self.select_suggested_contact)
+            self.fields[key].setCompleter(completer)
+            self.contact_completers[key] = completer
+            completers.append(completer)
+        for completer in completers:
+            completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchFlag.MatchContains)
+            completer.setMaxVisibleItems(12)
+        self.fields["make"].setPlaceholderText("Начните вводить или укажите свою марку")
+        self.fields["model"].setPlaceholderText("Модели выбранной марки или своё название")
+
+    def update_models(self, *_):
+        self.model_suggestions.setStringList(self.catalog.models(self.fields["make"].text()))
+
+    def select_suggested_contact(self, index):
+        contact_id = index.data(Qt.ItemDataRole.UserRole)
+        row = self.contacts.findData(contact_id)
+        if row >= 0:
+            self.contacts.blockSignals(True)
+            self.contacts.setCurrentIndex(row)
+            self.contacts.blockSignals(False)
+            self.choose_contact()
 
     def choose_contact(self):
         selected = self.contacts.currentData()

@@ -21,11 +21,12 @@ from PySide6.QtWidgets import (
 
 from app.database.connection import backup_database, restore_database
 from app.services.records import Records
+from app.ui.customers import CustomersPage
 from app.ui.maintenance import CallsPage
 from app.ui.vehicles import VehiclesPage
 from app.version import VERSION
 
-SECTIONS = ("Автомобили", "Звонки", "Календарь", "Финансы", "Настройки")
+SECTIONS = ("Автомобили", "Клиенты", "Звонки", "Календарь", "Финансы", "Настройки")
 
 STYLESHEET = """
 QWidget { color: #243247; font-family: 'Segoe UI'; font-size: 10pt; }
@@ -89,11 +90,15 @@ class MainWindow(QMainWindow):
         self.db_path = db_path
         self.records = Records(db_path)
         self.vehicles_page = VehiclesPage(self.records)
+        self.customers_page = CustomersPage(self.records)
         self.calls_page = CallsPage(self.records)
         self.dashboard = CallsPage(self.records, "Звонки")
         for name in SECTIONS:
             if name == "Автомобили":
                 self.pages.addWidget(self.vehicles_page)
+                continue
+            if name == "Клиенты":
+                self.pages.addWidget(self.customers_page)
                 continue
             if name in ("Звонки", "Календарь"):
                 self.pages.addWidget(self.dashboard if name == "Звонки" else self.calls_page)
@@ -139,7 +144,8 @@ class MainWindow(QMainWindow):
         self.navigation.setCurrentRow(0)
         self.navigation.setFocus()
         self.statusBar().showMessage(
-            f"Версия {VERSION} · Пилот  ·  Разделы: Ctrl+1…5  ·  Навигация: Tab и стрелки"
+            f"Версия {VERSION} · Пилот  ·  Разделы: Ctrl+1…{len(SECTIONS)}"
+            "  ·  Навигация: Tab и стрелки"
         )
         for index in range(len(SECTIONS)):
             shortcut = QShortcut(QKeySequence(f"Ctrl+{index + 1}"), self)
@@ -149,7 +155,9 @@ class MainWindow(QMainWindow):
 
     def refresh_page(self, index):
         page = self.pages.widget(index)
-        if page is self.dashboard:
+        if page in (self.vehicles_page, self.customers_page):
+            page.refresh()
+        elif page is self.dashboard:
             self.dashboard.refresh()
         elif page is self.calls_page:
             self.calls_page.refresh()

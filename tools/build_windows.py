@@ -69,6 +69,8 @@ def build(output: Path, compiler: Path):
             str(output),
             "--collect-data",
             "reportlab",
+            "--add-data",
+            f"{project / 'app' / 'assets'}:app/assets",
             "--exclude-module",
             "pytest",
             "--exclude-module",

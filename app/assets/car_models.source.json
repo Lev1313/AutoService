@@ -1,0 +1,10 @@
+{
+  "source": "https://github.com/serhatkildaci/global-car-models",
+  "commit": "44da5c9e5e0f3162d65579033f7a641473308b11",
+  "license": "MIT",
+  "downloaded": "2026-11-14",
+  "sha256": "42c74b1906cd43ff119081ad6dda1f015424b43c642c17eb436d5e252ec04f3b",
+  "raw_makes": 94,
+  "raw_models": 1829,
+  "scope": "Names only; not an exhaustive or current list of all markets/model years"
+}

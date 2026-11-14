@@ -49,8 +49,8 @@ def test_window_and_navigation(application, tmp_path):
         assert window.pages.currentWidget() is window.vehicles_page
         QTest.keyClick(window.navigation, Qt.Key.Key_Down)
         assert window.pages.currentIndex() == 1
-        assert window.pages.currentWidget() is window.dashboard
-        assert window.navigation.currentItem().text() == "Звонки"
+        assert window.pages.currentWidget() is window.customers_page
+        assert window.navigation.currentItem().text() == "Клиенты"
         window.focus_search()
         assert window.pages.currentWidget() is window.vehicles_page
         table = window.vehicles_page.table
