@@ -26,7 +26,7 @@ from app.ui.maintenance import CallsPage
 from app.ui.vehicles import VehiclesPage
 from app.version import VERSION
 
-SECTIONS = ("Автомобили", "Клиенты", "Звонки", "Календарь", "Финансы", "Настройки")
+SECTIONS = ("Автомобили", "Клиенты", "Звонки", "Финансы", "Настройки")
 
 STYLESHEET = """
 QWidget { color: #243247; font-family: 'Segoe UI'; font-size: 10pt; }
@@ -91,8 +91,7 @@ class MainWindow(QMainWindow):
         self.records = Records(db_path)
         self.vehicles_page = VehiclesPage(self.records)
         self.customers_page = CustomersPage(self.records)
-        self.calls_page = CallsPage(self.records)
-        self.dashboard = CallsPage(self.records, "Звонки")
+        self.calls_page = CallsPage(self.records, "Звонки")
         for name in SECTIONS:
             if name == "Автомобили":
                 self.pages.addWidget(self.vehicles_page)
@@ -100,8 +99,8 @@ class MainWindow(QMainWindow):
             if name == "Клиенты":
                 self.pages.addWidget(self.customers_page)
                 continue
-            if name in ("Звонки", "Календарь"):
-                self.pages.addWidget(self.dashboard if name == "Звонки" else self.calls_page)
+            if name == "Звонки":
+                self.pages.addWidget(self.calls_page)
                 continue
             page = QWidget()
             content = QVBoxLayout(page)
@@ -127,6 +126,9 @@ class MainWindow(QMainWindow):
                 restore_button = QPushButton("Восстановить из копии")
                 restore_button.clicked.connect(self.restore_backup)
                 content.addWidget(restore_button)
+                export_button = QPushButton("Экспорт базы в TXT / Excel")
+                export_button.clicked.connect(self.export_data)
+                content.addWidget(export_button)
                 document_settings = QPushButton("Реквизиты для квитанций")
                 document_settings.clicked.connect(self.document_settings)
                 content.addWidget(document_settings)
@@ -157,8 +159,6 @@ class MainWindow(QMainWindow):
         page = self.pages.widget(index)
         if page in (self.vehicles_page, self.customers_page):
             page.refresh()
-        elif page is self.dashboard:
-            self.dashboard.refresh()
         elif page is self.calls_page:
             self.calls_page.refresh()
 
@@ -172,6 +172,11 @@ class MainWindow(QMainWindow):
         from app.ui.documents import DocumentSettingsDialog
 
         DocumentSettingsDialog(Documents(self.db_path), self).exec()
+
+    def export_data(self):
+        from app.ui.export import ExportDialog
+
+        ExportDialog(self.records, self).exec()
 
     def create_backup(self):
         filename, _ = QFileDialog.getSaveFileName(

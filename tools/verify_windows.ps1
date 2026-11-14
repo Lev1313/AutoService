@@ -1,6 +1,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$ReleaseDirectory,
-    [Parameter(Mandatory = $true)][string]$TestDirectory
+    [Parameter(Mandatory = $true)][string]$TestDirectory,
+    [string]$TestInstaller = '',
+    [string]$TestApplicationId = ''
 )
 $ErrorActionPreference = 'Stop'
 $release = (Resolve-Path -LiteralPath $ReleaseDirectory).Path
@@ -8,7 +10,17 @@ $root = [IO.Path]::GetFullPath($TestDirectory)
 if (Test-Path -LiteralPath $root) { throw 'Test directory must be new' }
 $installer = @(Get-ChildItem -LiteralPath $release -Filter '*-Setup.exe')
 if ($installer.Count -ne 1) { throw 'Exactly one installer is required' }
+$productionKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{A3553935-C9A5-40F9-9266-ABDC9A3C44CE}_is1'
+$productionState = if (Test-Path -LiteralPath $productionKey) { (Get-ItemProperty -LiteralPath $productionKey | Select-Object * -ExcludeProperty PS* | ConvertTo-Json -Compress) } else { '' }
+
 $registryKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{A3553935-C9A5-40F9-9266-ABDC9A3C44CE}_is1'
+if ($TestInstaller -or $TestApplicationId) {
+    if (-not $TestInstaller -or $TestApplicationId -notmatch '^\{[0-9A-Fa-f-]{36}\}$' -or $TestApplicationId -eq '{A3553935-C9A5-40F9-9266-ABDC9A3C44CE}') {
+        throw 'Isolated verification requires a different valid AppId and its installer'
+    }
+    $installer = @(Get-Item -LiteralPath $TestInstaller)
+    $registryKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\' + $TestApplicationId + '_is1'
+}
 if (Test-Path -LiteralPath $registryKey) { throw 'An AutoService installation already exists: installation test stopped' }
 New-Item -ItemType Directory -Path $root | Out-Null
 $oldEnvironment = @{}
@@ -112,6 +124,10 @@ try {
         reinstall=$true;uninstall=$true;data_sha256=$originalHash;data_preserved=$true;
         second_instance_blocked=$true;external_python_qt_loaded=$false;clean_computer_tested=$false} |
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'windows-check.json') -Encoding utf8
+    if ($TestApplicationId) {
+        $productionAfter = if (Test-Path -LiteralPath $productionKey) { (Get-ItemProperty -LiteralPath $productionKey | Select-Object * -ExcludeProperty PS* | ConvertTo-Json -Compress) } else { '' }
+        if ($productionAfter -ne $productionState) { throw 'Production installation registry changed' }
+    }
     Write-Output "Windows release check passed: $root"
 }
 finally {

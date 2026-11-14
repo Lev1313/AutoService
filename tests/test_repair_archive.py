@@ -182,3 +182,18 @@ def test_v5_migration_backup_and_transaction_rollback(tmp_path, monkeypatch):
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
         assert "carried_km" not in [r[1] for r in connection.execute("PRAGMA table_info(repairs)")]
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
+def test_restoring_conflicting_mileage_requires_explicit_choice(data):
+    from app.services.records import RestoreMileageConflict
+
+    records, car, first = data
+    records.set_repair_deleted(car, first)
+    records.save_repair(car, {"visit_date": "2026-02-01", "km": 900})
+    with pytest.raises(RestoreMileageConflict):
+        records.set_repair_deleted(car, first, False)
+    assert len(records.repairs(car)) == 1
+    records.set_repair_deleted(car, first, False, allow_unverified=True)
+    restored = next(r for r in records.repairs(car) if r["id"] == first)
+    assert restored["km"] == 1000 and restored["verified"] == 0
+    assert records.latest_mileage(car)["km"] == 900

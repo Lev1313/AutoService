@@ -1,7 +1,9 @@
 """Настраиваемое ТО и список звонков без автоматического распознавания заметок."""
 
 from PySide6.QtCore import QDate
+from PySide6.QtGui import QColor, QTextCharFormat
 from PySide6.QtWidgets import (
+    QCalendarWidget,
     QCheckBox,
     QComboBox,
     QDateEdit,
@@ -345,6 +347,26 @@ class CallsPage(QWidget):
         title = plain_label(heading)
         title.setObjectName("title")
         layout.addWidget(title)
+        mode_row = QHBoxLayout()
+        self.view_mode = QComboBox()
+        self.view_mode.addItem("Список", "list")
+        self.view_mode.addItem("Календарь", "calendar")
+        self.view_mode.setAccessibleName("Вид звонков")
+        mode_row.addWidget(self.view_mode)
+        self.unknown_button = QPushButton("Уточнить срок")
+        self.unknown_button.clicked.connect(self.show_unknown)
+        mode_row.addWidget(self.unknown_button)
+        mode_row.addStretch()
+        layout.addLayout(mode_row)
+        self.calendar = QCalendarWidget()
+        self.calendar.setGridVisible(True)
+        self.calendar.setMaximumHeight(290)
+        self.calendar.setMaximumWidth(330)
+        self.calendar.setAccessibleName("Календарь звонков")
+        self.calendar.setVisible(False)
+        self.calendar_note = plain_label("")
+        self.calendar_note.setVisible(False)
+        layout.addWidget(self.calendar_note)
         row = QHBoxLayout()
         self.filter = QComboBox()
         for name, key in (
@@ -367,7 +389,10 @@ class CallsPage(QWidget):
         self.table = make_table(("Позвонить", "Автомобиль", "Контакт / телефон", "Повод"))
         self.table.itemSelectionChanged.connect(self.describe)
         self.table.cellDoubleClicked.connect(lambda *_: self.open_car())
-        layout.addWidget(self.table, 1)
+        body = QHBoxLayout()
+        body.addWidget(self.calendar)
+        body.addWidget(self.table, 1)
+        layout.addLayout(body, 1)
         self.details = QPlainTextEdit()
         self.details.setReadOnly(True)
         self.details.setMaximumHeight(180)
@@ -385,7 +410,22 @@ class CallsPage(QWidget):
             "Правила ТО добавляются в карточке автомобиля: «ТО и напоминания»."
         )
         layout.addWidget(self.empty)
+        self.marked_dates = set()
+        self.view_mode.currentIndexChanged.connect(self.change_view)
+        self.calendar.selectionChanged.connect(self.refresh)
         self.refresh()
+
+    def change_view(self):
+        calendar = self.view_mode.currentData() == "calendar"
+        self.calendar.setVisible(calendar)
+        self.calendar_note.setVisible(calendar)
+        # Calendar initially shows all open calls on the selected day.
+        self.filter.setCurrentIndex(self.filter.findData("all"))
+        self.refresh()
+
+    def show_unknown(self):
+        self.view_mode.setCurrentIndex(0)
+        self.filter.setCurrentIndex(self.filter.findData("unknown"))
 
     def refresh(self):
         try:
@@ -405,7 +445,32 @@ class CallsPage(QWidget):
                     "handled": task["status"] != "open" or not task["enabled"],
                 }[key]
 
-            self.rows = [task for task in rows if matches(task)]
+            self.unknown_button.setText(
+                f"Уточнить срок ({sum(task['due_date'] is None for task in rows)})"
+            )
+            filtered = [task for task in rows if matches(task)]
+            if self.view_mode.currentData() == "calendar":
+                for value in self.marked_dates:
+                    self.calendar.setDateTextFormat(
+                        QDate.fromString(value, "yyyy-MM-dd"), QTextCharFormat()
+                    )
+                self.marked_dates = {task["due_date"] for task in filtered if task["due_date"]}
+                highlight = QTextCharFormat()
+                highlight.setBackground(QColor("#dceaff"))
+                highlight.setFontWeight(700)
+                for value in self.marked_dates:
+                    self.calendar.setDateTextFormat(
+                        QDate.fromString(value, "yyyy-MM-dd"), highlight
+                    )
+                selected = self.calendar.selectedDate().toString("yyyy-MM-dd")
+                self.rows = [task for task in filtered if task["due_date"] == selected]
+                unknown = sum(task["due_date"] is None for task in filtered)
+                self.calendar_note.setText(
+                    f"{formatted_date(selected)} · звонков: {len(self.rows)}. "
+                    f"Без даты: {unknown} — кнопка «Уточнить срок». Дни со звонками выделены."
+                )
+            else:
+                self.rows = filtered
             self.table.setRowCount(len(self.rows))
             for index, task in enumerate(self.rows):
                 for column, value in enumerate(

@@ -14,7 +14,7 @@ from datetime import date
 from hashlib import sha256
 from pathlib import Path
 
-from PySide6.QtCore import QBuffer, QIODevice, QSize
+from PySide6.QtCore import QBuffer, QDate, QIODevice, QSize
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtTest import QTest
@@ -30,6 +30,7 @@ from app.database.connection import (
 )
 from app.services.catalog import VehicleCatalog
 from app.services.documents import Documents
+from app.services.export_data import export_database
 from app.services.maintenance import Maintenance
 from app.services.records import Records
 from app.services.txt_import import TxtImport
@@ -141,6 +142,25 @@ def prepare(root):
     check(records.find_contacts("000000")[0]["vehicle_count"] == 1, "Общий список клиентов")
     check("Volkswagen" in VehicleCatalog(records).makes(), "Встроенные марки")
     check("Golf" in VehicleCatalog(records).models("VW"), "Встроенные модели")
+    carried = records.save_repair(
+        car,
+        {
+            "visit_date": "2026-02-20",
+            "carried_km": 100000,
+            "carried_on": "2026-01-31",
+            "description": "Вымышленная запись без нового замера",
+        },
+    )
+    carried_document = documents.create(carried)
+    records.set_repair_deleted(imported["vehicle_id"], imported["repair_id"])
+    check(not records.repairs(imported["vehicle_id"]), "Удалённый TXT скрыт")
+    check(
+        importer.preview(source_path).fragments[0].imported,
+        "Удалённый TXT не импортируется повторно",
+    )
+    export_database(path, root / "txt-export", "txt")
+    export_database(path, root / "excel-export", "xlsx")
+    check((root / "excel-export" / "AutoService.xlsx").is_file(), "Выгрузка XLSX")
     backup = backup_database(path, root / "release-backup.sqlite3")
     records.save_vehicle(records.vehicle(car) | {"plate": "ИЗМЕНЕНО-ДЛЯ-ТЕСТА"}, car)
     restore_database(path, backup)
@@ -155,6 +175,8 @@ def prepare(root):
         "customer_id": customer_id,
         "standalone_customer": standalone_customer,
         "repair": repair,
+        "carried_repair": carried,
+        "carried_document": carried_document["id"],
         "documents": [simple["id"], detailed["id"]],
         "imported_repair": imported["repair_id"],
         "pdf_sha256": sha256(content).hexdigest(),
@@ -172,8 +194,31 @@ def reopen(root, report):
         records = window.records
         check(records.vehicle(report["car"])["plate"] == "ТЕСТ-ПИЛОТ", "Повторный запуск: машина")
         check(
-            records.repairs(report["car"])[0]["amount_kopecks"] == 150050, "Повторный запуск: сумма"
+            next(r for r in records.repairs(report["car"]) if r["id"] == report["repair"])[
+                "amount_kopecks"
+            ]
+            == 150050,
+            "Повторный запуск: сумма",
         )
+        carried = next(
+            r for r in records.repairs(report["car"]) if r["id"] == report["carried_repair"]
+        )
+        check(
+            carried["carried_km"] == 100000 and carried["km"] is None,
+            "Перенесённый пробег после перезапуска",
+        )
+        check(
+            records.latest_mileage(report["car"])["recorded_on"] == "2026-01-31",
+            "Прежняя дата замера",
+        )
+        with connect(path) as connection:
+            archived_vehicle = connection.execute(
+                "SELECT vehicle_id FROM repairs WHERE id=?", (report["imported_repair"],)
+            ).fetchone()[0]
+        check(not records.repairs(archived_vehicle), "Удаление после backup/restore и перезапуска")
+        records.set_repair_deleted(archived_vehicle, report["imported_repair"], False)
+        check(records.repairs(archived_vehicle)[0]["origin"] == "txt", "Восстановление TXT")
+        records.set_repair_deleted(archived_vehicle, report["imported_repair"])
         task = Maintenance(path).tasks(date(2026, 8, 1))[0]
         check(task["manual_date"] == "2026-12-01", "Повторный запуск: перенос звонка")
         check(
@@ -213,6 +258,13 @@ def reopen(root, report):
             window.navigation.setCurrentRow(index)
             application.processEvents()
             check(window.pages.currentIndex() == index, "Переключение раздела")
+        check(window.navigation.count() == 5, "Единый раздел звонков")
+        window.navigation.setCurrentRow(window.pages.indexOf(window.calls_page))
+        window.calls_page.view_mode.setCurrentIndex(1)
+        window.calls_page.calendar.setSelectedDate(QDate(2026, 12, 1))
+        check(window.calls_page.rows[0]["manual_date"] == "2026-12-01", "Одна задача в календаре")
+        QTest.qWait(200)
+        check(window.grab().save(str(root / "calls-calendar.png")), "Снимок календаря")
         window.navigation.setCurrentRow(window.pages.indexOf(window.customers_page))
         window.customers_page.search.setText("000000")
         QTest.qWait(200)

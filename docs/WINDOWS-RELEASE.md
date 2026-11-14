@@ -1,6 +1,6 @@
 # Выпуск AutoService для Windows
 
-Версия 0.3.0, пилот. Windows x64; сборка на Windows 11, Python 3.13.1.
+Версия 0.4.0, пилот. Windows x64; сборка на Windows 11, Python 3.13.1.
 Целевая нижняя граница установщика: Windows 10 1809 x64. На отдельном чистом
 компьютере и на каждой версии Windows проверки ещё не было.
 
@@ -74,3 +74,14 @@ release-check.json: stage=passed, frozen=true. Существующий ката
 Основания выбора инструментов: [PyInstaller](https://pyinstaller.org/en/stable/operating-mode.html),
 [Inno Setup: установка без прав администратора](https://jrsoftware.org/ishelp/topic_setup_privilegesrequired.htm),
 [проверка загрузки Inno](https://jrsoftware.org/isdl-verify.php).
+
+
+## Изолированная проверка при существующей установке
+verify_windows.ps1 по умолчанию останавливает установочный тест, если AppId владельца
+уже зарегистрирован. Не удалять его установку ради проверки. Допустим отдельный
+проверочный Setup из того же packaging/autoservice.iss и payload с другим AppId.
+Для него передать -TestInstaller и -TestApplicationId; GUID обязан отличаться от
+основного. /NOICONS /TASKS="" и отдельный /DIR исключают изменение ярлыков/файлов владельца.
+Сценарий проверяет сохранение регистрации основной установки до/после. Отдельный
+проверочный Setup не выдавать владельцу; выдаётся обычный production Setup с прежним AppId.
+Финальная проверка 0.4.0: RELEASE-0.4.0.md.

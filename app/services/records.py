@@ -43,6 +43,10 @@ def mileage_text(repair):
     return f"{km:,}".replace(",", " ") + (" (?)" if not repair.get("verified", True) else "")
 
 
+class RestoreMileageConflict(ValueError):
+    pass
+
+
 class Records:
     def __init__(self, path: Path):
         self.path = path
@@ -393,8 +397,29 @@ class Records:
                 )
             }
 
-    def set_repair_deleted(self, vehicle_id, repair_id, deleted=True):
+    def set_repair_deleted(self, vehicle_id, repair_id, deleted=True, allow_unverified=False):
         with connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            reading = connection.execute(
+                "SELECT * FROM odometer_readings WHERE repair_id=? AND vehicle_id=? AND verified=1",
+                (repair_id, vehicle_id),
+            ).fetchone()
+            if (
+                not deleted
+                and reading
+                and not self.mileage_consistent(
+                    vehicle_id, reading["recorded_on"], reading["km"], repair_id
+                )
+            ):
+                if not allow_unverified:
+                    raise RestoreMileageConflict(
+                        "После удаления появились противоречащие замеры. Восстановить ремонт, "
+                        "сохранив его пробег как неподтверждённый? "
+                        "Исходное число останется в истории."
+                    )
+                connection.execute(
+                    "UPDATE odometer_readings SET verified=0 WHERE repair_id=?", (repair_id,)
+                )
             cursor = connection.execute(
                 "UPDATE repairs SET deleted_at=? WHERE id=? AND vehicle_id=?",
                 (

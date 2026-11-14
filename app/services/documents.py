@@ -115,7 +115,7 @@ class Documents:
         with connect(self.path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             repair = connection.execute(
-                """SELECT r.*, COALESCE(o.km,r.undated_km) AS km FROM repairs r
+                """SELECT r.*, COALESCE(o.km,r.undated_km) AS km, o.verified FROM repairs r
                 LEFT JOIN odometer_readings o ON o.repair_id=r.id
                 WHERE r.id=?""",
                 (repair_id,),

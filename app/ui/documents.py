@@ -305,6 +305,10 @@ class DocumentDialog(SafeDialog):
             )
         else:
             self.clear_preview()
+            if self.deleted_repair:
+                self.message.setText(
+                    "Ремонт удалён. Выданных квитанций нет; для новой восстановите ремонт."
+                )
 
     def source_repair(self):
         from app.database.connection import connect

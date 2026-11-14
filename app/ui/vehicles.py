@@ -26,7 +26,14 @@ from PySide6.QtWidgets import (
 )
 
 from app.services.catalog import VehicleCatalog
-from app.services.records import Records, amount_text, mileage_text, parse_amount, search_key
+from app.services.records import (
+    Records,
+    RestoreMileageConflict,
+    amount_text,
+    mileage_text,
+    parse_amount,
+    search_key,
+)
 
 ERRORS = (ValueError, OSError, sqlite3.Error)
 
@@ -521,6 +528,9 @@ class VehicleCard(QDialog):
         self.delete_button = QPushButton("Удалить ремонт")
         self.delete_button.clicked.connect(self.toggle_deleted)
         bottom.addWidget(self.delete_button)
+        self.source_button = QPushButton("Исходный TXT")
+        self.source_button.clicked.connect(self.open_source)
+        bottom.addWidget(self.source_button)
         bottom.addStretch()
         close = QPushButton("Закрыть")
         close.clicked.connect(self.accept)
@@ -582,6 +592,7 @@ class VehicleCard(QDialog):
         selected = self.rows[row] if 0 <= row < len(self.rows) else None
         self.open_button.setEnabled(bool(selected) and not selected["deleted_at"])
         self.delete_button.setEnabled(bool(selected))
+        self.source_button.setVisible(bool(selected) and selected["origin"] == "txt")
         self.delete_button.setText(
             "Восстановить ремонт" if selected and selected["deleted_at"] else "Удалить ремонт"
         )
@@ -593,6 +604,16 @@ class VehicleCard(QDialog):
             )
             + (selected["description"] if selected else "")
         )
+
+    def open_source(self):
+        from app.ui.txt_import import SourceDialog
+
+        row = self.history.currentRow()
+        if 0 <= row < len(self.rows) and self.rows[row]["origin"] == "txt":
+            try:
+                SourceDialog(self.records.path, self.rows[row]["id"], self).exec()
+            except ERRORS as error:
+                QMessageBox.warning(self, "Не удалось открыть источник", str(error))
 
     def toggle_deleted(self):
         row = self.history.currentRow()
@@ -630,7 +651,23 @@ class VehicleCard(QDialog):
                 != QMessageBox.StandardButton.Yes
             ):
                 return
-            self.records.set_repair_deleted(self.vehicle_id, repair["id"], deleting)
+            try:
+                self.records.set_repair_deleted(self.vehicle_id, repair["id"], deleting)
+            except RestoreMileageConflict as conflict:
+                if (
+                    QMessageBox.question(
+                        self,
+                        "Проверьте пробег при восстановлении",
+                        str(conflict),
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                        QMessageBox.StandardButton.Cancel,
+                    )
+                    != QMessageBox.StandardButton.Yes
+                ):
+                    return
+                self.records.set_repair_deleted(
+                    self.vehicle_id, repair["id"], False, allow_unverified=True
+                )
             self.refresh()
         except ERRORS as error:
             QMessageBox.warning(self, "Не удалось изменить ремонт", str(error))
