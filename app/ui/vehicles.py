@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.services.catalog import VehicleCatalog
-from app.services.records import Records, amount_text, parse_amount, search_key
+from app.services.records import Records, amount_text, mileage_text, parse_amount, search_key
 
 ERRORS = (ValueError, OSError, sqlite3.Error)
 
@@ -276,15 +276,24 @@ class RepairDialog(SafeDialog):
         self.mileage = QLineEdit()
         self.mileage.setMaxLength(12)
         self.mileage.setAccessibleName("Пробег, км")
-        latest = records.latest_mileage(vehicle_id)
-        self.mileage.setPlaceholderText(
-            f"Последний: {latest['km']:,} км · {latest['recorded_on']}".replace(",", " ")
-            if latest
-            else "Необязательно"
-        )
-        if self.repair.get("km") is not None:
-            self.mileage.setText(str(self.repair["km"]))
+        self.carried = None
+        self.mileage.setPlaceholderText("Необязательно")
+        self.measured = QCheckBox("Пробег измерен при этом ремонте")
+        self.measured.setChecked(self.repair.get("km") is not None)
+        self.mileage_note = plain_label("")
         form.addRow("Пробег, км", self.mileage)
+        form.addRow(self.measured)
+        form.addRow(self.mileage_note)
+        if self.repair.get("carried_km") is not None:
+            self.carried = (self.repair["carried_km"], self.repair["carried_on"])
+            self.show_carried()
+        elif self.repair.get("km") is not None:
+            self.mileage.setText(str(self.repair["km"]))
+        elif not self.repair:
+            self.suggest_mileage()
+        self.mileage.textEdited.connect(self.mileage_edited)
+        self.measured.toggled.connect(self.measurement_changed)
+        self.visit_date.dateChanged.connect(self.date_changed)
         self.mileage_verified = QCheckBox("Пробег проверен")
         self.mileage_verified.setChecked(bool(self.repair.get("verified")))
         self.mileage_verified.setVisible(self.repair.get("origin") == "txt")
@@ -322,12 +331,56 @@ class RepairDialog(SafeDialog):
         layout.addLayout(row)
         self.prepare_guard()
 
+    def show_carried(self):
+        if self.carried:
+            self.mileage.setText(f"{self.carried[0]} ?")
+            self.mileage_note.setText(
+                f"Последний известный · замер {self.carried[1]}. Новый пробег не указан."
+            )
+        else:
+            self.mileage.clear()
+            self.mileage_note.setText("Нет подходящего подтверждённого замера на эту дату.")
+
+    def suggest_mileage(self):
+        latest = self.records.latest_mileage(
+            self.vehicle_id, self.visit_date.date().toString("yyyy-MM-dd"), self.repair.get("id")
+        )
+        self.carried = (latest["km"], latest["recorded_on"]) if latest else None
+        self.show_carried()
+
+    def date_changed(self, *_):
+        if not self.measured.isChecked():
+            self.suggest_mileage()
+
+    def mileage_edited(self, text):
+        self.carried = None
+        self.measured.blockSignals(True)
+        self.measured.setChecked(bool(text.strip()))
+        self.measured.blockSignals(False)
+        if "?" in text:
+            self.mileage.setText(text.replace("?", "").strip())
+        self.mileage_note.setText("Новый замер" if text.strip() else "Пробег не указан")
+
+    def measurement_changed(self, measured):
+        if measured:
+            value = self.carried[0] if self.carried else None
+            self.carried = None
+            if value is not None:
+                self.mileage.setText(str(value))
+            self.mileage_note.setText("Новый замер — укажите фактическое значение.")
+            self.mileage.setFocus()
+            self.mileage.selectAll()
+        else:
+            self.suggest_mileage()
+
     def state(self):
         values = {
             "visit_date": self.visit_date.date().toString("yyyy-MM-dd")
             if self.date_known.isChecked()
             else None,
-            "km": self.mileage.text(),
+            "km": self.mileage.text() if self.carried is None else "",
+            "carried_km": self.carried[0] if self.carried else None,
+            "carried_on": self.carried[1] if self.carried else None,
             "amount": self.amount.text(),
             "description": self.description.toPlainText(),
         }
@@ -450,6 +503,9 @@ class VehicleCard(QDialog):
         self.history.setAccessibleName("История ремонтов")
         self.history.cellDoubleClicked.connect(lambda *_: self.open_repair())
         self.history.itemSelectionChanged.connect(self.show_description)
+        self.show_deleted = QCheckBox("Показать удалённые ремонты")
+        self.show_deleted.toggled.connect(self.refresh)
+        layout.addWidget(self.show_deleted)
         layout.addWidget(self.history, 1)
         self.preview = QPlainTextEdit()
         self.preview.setReadOnly(True)
@@ -462,6 +518,9 @@ class VehicleCard(QDialog):
         document_button = QPushButton("Документы / Печать")
         document_button.clicked.connect(self.open_documents)
         bottom.addWidget(document_button)
+        self.delete_button = QPushButton("Удалить ремонт")
+        self.delete_button.clicked.connect(self.toggle_deleted)
+        bottom.addWidget(self.delete_button)
         bottom.addStretch()
         close = QPushButton("Закрыть")
         close.clicked.connect(self.accept)
@@ -488,13 +547,11 @@ class VehicleCard(QDialog):
             f"VIN: {vehicle['vin'] or '—'} · Год: {vehicle['year'] or '—'}\n"
             f"{mileage}" + (f"\n{vehicle['notes']}" if vehicle["notes"] else "")
         )
-        self.rows = self.records.repairs(self.vehicle_id)
+        self.rows = self.records.repairs(self.vehicle_id, self.show_deleted.isChecked())
         self.history.setRowCount(len(self.rows))
         self.preview.clear()
         for index, repair in enumerate(self.rows):
-            km = "—" if repair["km"] is None else str(repair["km"])
-            if repair["km"] is not None and not repair["verified"]:
-                km += " (?)"
+            km = mileage_text(repair)
             values = (
                 QDate.fromString(repair["visit_date"], "yyyy-MM-dd").toString("dd.MM.yyyy")
                 if repair["visit_date"]
@@ -503,7 +560,9 @@ class VehicleCard(QDialog):
                 repair["description"].replace("\n", " ")[:100],
                 amount_text(repair["amount_kopecks"]) or "Неизвестна",
                 (
-                    "Импорт: статус не уточнён"
+                    "Удалён"
+                    if repair["deleted_at"]
+                    else "Импорт: статус не уточнён"
                     if not repair["state_known"]
                     else "В истории"
                     if repair["completed"]
@@ -513,15 +572,68 @@ class VehicleCard(QDialog):
             for column, value in enumerate(values):
                 self.history.setItem(index, column, QTableWidgetItem(value))
         self.open_button.setEnabled(bool(self.rows))
+        self.delete_button.setEnabled(bool(self.rows))
         if self.rows:
             self.history.selectRow(0)
             self.show_description()
 
     def show_description(self):
         row = self.history.currentRow()
-        self.preview.setPlainText(
-            self.rows[row]["description"] if 0 <= row < len(self.rows) else ""
+        selected = self.rows[row] if 0 <= row < len(self.rows) else None
+        self.open_button.setEnabled(bool(selected) and not selected["deleted_at"])
+        self.delete_button.setEnabled(bool(selected))
+        self.delete_button.setText(
+            "Восстановить ремонт" if selected and selected["deleted_at"] else "Удалить ремонт"
         )
+        self.preview.setPlainText(
+            (
+                ("Удалён: " + selected["deleted_at"] + "\n")
+                if selected and selected["deleted_at"]
+                else ""
+            )
+            + (selected["description"] if selected else "")
+        )
+
+    def toggle_deleted(self):
+        row = self.history.currentRow()
+        if not 0 <= row < len(self.rows):
+            return
+        repair = self.rows[row]
+        deleting = not repair["deleted_at"]
+        try:
+            links = self.records.repair_links(repair["id"])
+            text = (
+                f"{self.heading.text()}\nДата: {repair['visit_date'] or 'неизвестна'}\n"
+                f"{repair['description'][:250]}\n\n"
+            )
+            if deleting:
+                text += (
+                    "Убрать ремонт из истории? Его можно восстановить. "
+                    "Замер этого ремонта перестанет определять текущий пробег.\n"
+                    f"Сохранены: квитанции — {links['documents']}, TXT — {links['sources']}.\n"
+                )
+                if links["maintenance"]:
+                    text += (
+                        f"Связанных отметок ТО: {links['maintenance']}. "
+                        "Выполнение ТО и его отдельные замеры не отменяются."
+                    )
+            else:
+                text += "Восстановить ремонт со всеми связями и замером пробега?"
+            if (
+                QMessageBox.question(
+                    self,
+                    "Удалить ремонт?" if deleting else "Восстановить ремонт?",
+                    text,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Cancel,
+                )
+                != QMessageBox.StandardButton.Yes
+            ):
+                return
+            self.records.set_repair_deleted(self.vehicle_id, repair["id"], deleting)
+            self.refresh()
+        except ERRORS as error:
+            QMessageBox.warning(self, "Не удалось изменить ремонт", str(error))
 
     def edit_vehicle(self):
         if VehicleDialog(self.records, self.vehicle_id, self).exec():
@@ -541,6 +653,7 @@ class VehicleCard(QDialog):
         row = self.history.currentRow()
         if (
             0 <= row < len(self.rows)
+            and not self.rows[row]["deleted_at"]
             and RepairDialog(self.records, self.vehicle_id, self.rows[row], self).exec()
         ):
             self.refresh()

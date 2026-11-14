@@ -7,7 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 SCHEMA_V2 = (
     """CREATE TABLE contacts (id INTEGER PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '')""",
@@ -104,6 +104,13 @@ SCHEMA_V5 = (
 )
 
 
+SCHEMA_V6 = (
+    "ALTER TABLE repairs ADD COLUMN carried_km INTEGER CHECK(carried_km >= 0)",
+    "ALTER TABLE repairs ADD COLUMN carried_on TEXT",
+    "ALTER TABLE repairs ADD COLUMN deleted_at TEXT",
+)
+
+
 @contextmanager
 def connect(path: Path):
     connection = sqlite3.connect(path, timeout=5)
@@ -183,6 +190,9 @@ def initialize_database(path: Path) -> None:
         if version < 5:
             for statement in SCHEMA_V5:
                 connection.execute(statement)
+        if version < 6:
+            for statement in SCHEMA_V6:
+                connection.execute(statement)
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         validate_tables(connection)
 
@@ -206,7 +216,7 @@ def validate_tables(connection):
         "SELECT repair_id, payload FROM document_drafts",
         "SELECT id, number, repair_id, created_at, kind, payload FROM documents",
         "SELECT document_id, content, sha256 FROM document_files",
-        "SELECT origin, state_known, undated_km FROM repairs",
+        "SELECT origin, state_known, undated_km, carried_km, carried_on, deleted_at FROM repairs",
         "SELECT id, sha256, original_bytes, decoded_text, encoding, original_name, imported_at "
         "FROM import_sources",
         "SELECT id, source_id, source_path FROM import_paths",

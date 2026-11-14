@@ -221,7 +221,8 @@ class Maintenance:
                 raise ValueError("Пробег противоречит истории. Проверьте или оставьте поле пустым.")
             if repair_id is not None:
                 repair = connection.execute(
-                    "SELECT * FROM repairs WHERE id=? AND vehicle_id=? AND completed=1",
+                    "SELECT * FROM repairs WHERE id=? AND vehicle_id=? "
+                    "AND completed=1 AND deleted_at IS NULL",
                     (repair_id, plan["vehicle_id"]),
                 ).fetchone()
                 if repair is None:
@@ -266,8 +267,10 @@ class Maintenance:
                 readings = [
                     dict(row)
                     for row in connection.execute(
-                        "SELECT * FROM odometer_readings WHERE vehicle_id=? "
-                        "ORDER BY recorded_on, id",
+                        "SELECT o.* FROM odometer_readings o "
+                        "LEFT JOIN repairs r ON r.id=o.repair_id "
+                        "WHERE o.vehicle_id=? AND r.deleted_at IS NULL "
+                        "ORDER BY o.recorded_on, o.id",
                         (plan["vehicle_id"],),
                     )
                 ]

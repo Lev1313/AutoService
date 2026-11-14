@@ -89,6 +89,11 @@ class Documents:
     def save_draft(self, repair_id, values):
         # Черновик допускает незаполненные поля; документ проверяется отдельно.
         with connect(self.path) as connection:
+            row = connection.execute(
+                "SELECT deleted_at FROM repairs WHERE id=?", (repair_id,)
+            ).fetchone()
+            if row is None or row["deleted_at"]:
+                raise ValueError("Ремонт не найден или удалён. Сначала восстановите его.")
             connection.execute(
                 "INSERT INTO document_drafts(repair_id,payload) VALUES (?,?) "
                 "ON CONFLICT(repair_id) DO UPDATE SET payload=excluded.payload",
@@ -115,6 +120,10 @@ class Documents:
                 WHERE r.id=?""",
                 (repair_id,),
             ).fetchone()
+            if repair is not None and repair["deleted_at"]:
+                raise ValueError(
+                    "Сначала восстановите удалённый ремонт. Выданные PDF доступны в архиве."
+                )
             if repair is None:
                 raise ValueError("Сначала сохраните ремонт.")
             vehicle = connection.execute(

@@ -34,6 +34,15 @@ def amount_text(kopecks: int | None) -> str:
     return "" if kopecks is None else f"{kopecks // 100},{kopecks % 100:02d}"
 
 
+def mileage_text(repair):
+    if repair.get("carried_km") is not None:
+        return f"{repair['carried_km']:,} ? · замер {repair['carried_on']}".replace(",", " ")
+    km = repair.get("km")
+    if km is None:
+        return "Не указан"
+    return f"{km:,}".replace(",", " ") + (" (?)" if not repair.get("verified", True) else "")
+
+
 class Records:
     def __init__(self, path: Path):
         self.path = path
@@ -204,32 +213,39 @@ class Records:
                 )
         return vehicle_id
 
-    def repairs(self, vehicle_id: int):
+    def repairs(self, vehicle_id: int, include_deleted=False):
         with connect(self.path) as connection:
             return [
                 dict(row)
                 for row in connection.execute(
                     """SELECT r.*, COALESCE(o.km,r.undated_km) AS km, o.verified FROM repairs r
                 LEFT JOIN odometer_readings o ON o.repair_id = r.id
-                WHERE r.vehicle_id = ? ORDER BY r.visit_date DESC, r.id DESC""",
-                    (vehicle_id,),
+                WHERE r.vehicle_id = ? AND (? OR r.deleted_at IS NULL)
+                ORDER BY r.visit_date DESC, r.id DESC""",
+                    (vehicle_id, include_deleted),
                 )
             ]
 
-    def latest_mileage(self, vehicle_id: int):
+    def latest_mileage(self, vehicle_id: int, on_date=None, exclude_repair=None):
         with connect(self.path) as connection:
             row = connection.execute(
-                """SELECT * FROM odometer_readings WHERE vehicle_id=? AND verified=1
-                ORDER BY recorded_on DESC, id DESC LIMIT 1""",
-                (vehicle_id,),
+                """SELECT o.* FROM odometer_readings o
+                LEFT JOIN repairs r ON r.id=o.repair_id
+                WHERE o.vehicle_id=? AND o.verified=1 AND r.deleted_at IS NULL
+                AND (? IS NULL OR o.recorded_on<=?)
+                AND (o.repair_id IS NULL OR o.repair_id!=?)
+                ORDER BY o.recorded_on DESC, o.id DESC LIMIT 1""",
+                (vehicle_id, on_date, on_date, exclude_repair or -1),
             ).fetchone()
         return dict(row) if row else None
 
     def mileage_consistent(self, vehicle_id: int, visit_date: str, km: int, repair_id=None):
         with connect(self.path) as connection:
             rows = connection.execute(
-                """SELECT recorded_on, km FROM odometer_readings WHERE vehicle_id=?
-                AND verified=1 AND (repair_id IS NULL OR repair_id != ?)""",
+                """SELECT o.recorded_on, o.km FROM odometer_readings o
+                LEFT JOIN repairs r ON r.id=o.repair_id
+                WHERE o.vehicle_id=? AND o.verified=1 AND r.deleted_at IS NULL
+                AND (o.repair_id IS NULL OR o.repair_id != ?)""",
                 (vehicle_id, repair_id if repair_id is not None else -1),
             ).fetchall()
         return all(
@@ -251,6 +267,8 @@ class Records:
             existing = next(
                 (row for row in self.repairs(vehicle_id) if row["id"] == repair_id), None
             )
+        if repair_id is not None and existing is None:
+            raise ValueError("Ремонт не найден или удалён. Сначала восстановите его.")
         if visit_date is None and existing and existing["origin"] == "txt":
             pass
         else:
@@ -261,6 +279,28 @@ class Records:
         km = values.get("km")
         if km is not None and (type(km) is not int or not 0 <= km <= 100_000_000):
             raise ValueError("Пробег должен быть целым неотрицательным числом.")
+        carried_km, carried_on = values.get("carried_km"), values.get("carried_on")
+        if carried_km is not None:
+            if km is not None or type(carried_km) is not int or not 0 <= carried_km <= 100_000_000:
+                raise ValueError("Старый пробег хранится отдельно от нового замера.")
+            try:
+                if not visit_date or date.fromisoformat(carried_on) > date.fromisoformat(
+                    visit_date
+                ):
+                    raise ValueError
+            except (ValueError, TypeError):
+                raise ValueError("Дата исходного замера не может быть позднее ремонта.") from None
+            unchanged = existing and (carried_km, carried_on) == (
+                existing["carried_km"],
+                existing["carried_on"],
+            )
+            latest = self.latest_mileage(vehicle_id, visit_date, repair_id)
+            if not unchanged and (
+                latest is None or (carried_km, carried_on) != (latest["km"], latest["recorded_on"])
+            ):
+                raise ValueError("Исходный замер изменился. Обновите старый пробег.")
+        elif carried_on is not None:
+            raise ValueError("Для даты исходного замера нужен старый пробег.")
         amount = values.get("amount_kopecks")
         if amount is not None and (type(amount) is not int or not 0 <= amount <= 99_999_999_999):
             raise ValueError("Стоимость должна быть целым неотрицательным числом копеек.")
@@ -320,6 +360,10 @@ class Records:
                 )
                 if cursor.rowcount != 1:
                     raise ValueError("Ремонт не найден у этого автомобиля.")
+            connection.execute(
+                "UPDATE repairs SET carried_km=?,carried_on=? WHERE id=?",
+                (carried_km, carried_on, repair_id),
+            )
             connection.execute("DELETE FROM odometer_readings WHERE repair_id=?", (repair_id,))
             if km is not None and visit_date is not None:
                 connection.execute(
@@ -335,3 +379,29 @@ class Records:
                     ),
                 )
         return repair_id
+
+    def repair_links(self, repair_id):
+        with connect(self.path) as connection:
+            return {
+                key: connection.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE repair_id=?", (repair_id,)
+                ).fetchone()[0]
+                for key, table in (
+                    ("documents", "documents"),
+                    ("sources", "import_fragments"),
+                    ("maintenance", "maintenance_events"),
+                )
+            }
+
+    def set_repair_deleted(self, vehicle_id, repair_id, deleted=True):
+        with connect(self.path) as connection:
+            cursor = connection.execute(
+                "UPDATE repairs SET deleted_at=? WHERE id=? AND vehicle_id=?",
+                (
+                    datetime.now().isoformat(timespec="seconds") if deleted else None,
+                    repair_id,
+                    vehicle_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("Ремонт не найден у этого автомобиля.")

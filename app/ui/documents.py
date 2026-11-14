@@ -205,7 +205,9 @@ class DocumentDialog(SafeDialog):
     def load_history(self, selected=None):
         self.history.blockSignals(True)
         self.history.clear()
-        self.history.addItem("Новый документ / черновик", None)
+        self.deleted_repair = bool(self.source_repair()["deleted_at"])
+        if not self.deleted_repair:
+            self.history.addItem("Новый документ / черновик", None)
         for document in self.service.history(self.repair_id):
             kind = "Простая" if document["kind"] == "simple" else "Подробная"
             stamp = datetime.fromisoformat(document["created_at"]).strftime("%d.%m.%Y %H:%M")
@@ -290,7 +292,7 @@ class DocumentDialog(SafeDialog):
             self.create_button,
             self.draft_button,
         ):
-            widget.setEnabled(not saved)
+            widget.setEnabled(not saved and not self.deleted_repair)
         self.items_panel.setVisible(values["kind"] == "detailed")
         self.previous_index = index
         self.original = self.state()

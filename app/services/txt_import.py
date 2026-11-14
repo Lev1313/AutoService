@@ -189,8 +189,9 @@ class TxtImport:
                 verified = bool(values.get("mileage_verified"))
                 if verified:
                     rows = connection.execute(
-                        "SELECT recorded_on,km FROM odometer_readings "
-                        "WHERE vehicle_id=? AND verified=1",
+                        "SELECT recorded_on,km FROM odometer_readings o "
+                        "LEFT JOIN repairs r ON r.id=o.repair_id "
+                        "WHERE o.vehicle_id=? AND o.verified=1 AND r.deleted_at IS NULL",
                         (vehicle_id,),
                     ).fetchall()
                     if not all(

@@ -24,7 +24,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from app.services.records import amount_text
+from app.services.records import amount_text, mileage_text
 
 
 def register_fonts():
@@ -98,8 +98,10 @@ def build_pdf(document: dict) -> bytes:
     ]
     if vehicle["vin"]:
         details.append(("VIN", vehicle["vin"]))
-    if repair["km"] is not None:
-        details.append(("Пробег", f"{repair['km']:,} км".replace(",", " ")))
+    if repair["km"] is not None or repair.get("carried_km") is not None:
+        details.append(("Пробег, км", mileage_text(repair)))
+        if repair.get("carried_km") is not None:
+            details.append(("", "Последний известный; новый пробег не указан."))
     info = Table(
         [[paragraph(key, small), paragraph(value)] for key, value in details],
         colWidths=[32 * mm, 142 * mm],
