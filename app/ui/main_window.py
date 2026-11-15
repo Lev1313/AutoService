@@ -64,7 +64,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("АвтоСервис — учёт автомобилей и ремонтов")
         if demo:
-            self.setWindowTitle(self.windowTitle() + " — показ механику")
+            self.setWindowTitle(self.windowTitle() + " — демонстрационный режим")
         self.resize(1100, 720)
         self.setMinimumSize(800, 540)
         self.setStyleSheet(STYLESHEET)
@@ -79,13 +79,8 @@ class MainWindow(QMainWindow):
         side_layout = QVBoxLayout(sidebar)
         side_layout.setContentsMargins(18, 25, 18, 18)
         side_layout.addWidget(label("АвтоСервис", "brand"))
-        side_layout.addWidget(
-            label(
-                "Показ механику · отдельные данные" if demo else "Рабочее пространство",
-                "muted",
-                True,
-            )
-        )
+        if demo:
+            side_layout.addWidget(label("Демонстрационный режим. Отдельные данные.", "muted", True))
         side_layout.addSpacing(24)
         self.navigation = QListWidget()
         self.navigation.setAccessibleName("Разделы программы")
@@ -94,8 +89,6 @@ class MainWindow(QMainWindow):
         self.help_button = QPushButton("Инструкция · F1")
         self.help_button.clicked.connect(self.show_help)
         side_layout.addWidget(self.help_button)
-        side_layout.addWidget(label("Локально · Без интернета", "muted"))
-        side_layout.addWidget(label("Автомобили · Ремонты · ТО", "muted"))
         layout.addWidget(sidebar)
 
         self.pages = QStackedWidget()
@@ -154,7 +147,7 @@ class MainWindow(QMainWindow):
         self.navigation.setCurrentRow(0)
         self.navigation.setFocus()
         self.statusBar().showMessage(
-            f"Версия {VERSION} · Пилот  ·  Разделы: Ctrl+1…{len(SECTIONS)}  ·  Инструкция: F1"
+            f"Версия {VERSION} ·  Разделы: Ctrl+1…{len(SECTIONS)}  ·  Инструкция: F1"
         )
         for index in range(len(SECTIONS)):
             shortcut = QShortcut(QKeySequence(f"Ctrl+{index + 1}"), self)

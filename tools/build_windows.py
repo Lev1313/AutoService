@@ -28,7 +28,7 @@ def build(output: Path, compiler: Path):
         + repr(numbers)
         + ", mask=0x3f, flags=0, OS=0x40004, fileType=1, subtype=0, date=(0,0)),"
         " kids=[StringFileInfo([StringTable('041904B0', ["
-        f"StringStruct('FileDescription', 'AutoService — пилотная версия'),"
+        f"StringStruct('FileDescription', 'AutoService'),"
         f"StringStruct('FileVersion', '{version}'), StringStruct('ProductVersion', '{version}'),"
         "StringStruct('ProductName', 'AutoService'), "
         "StringStruct('OriginalFilename', 'AutoService.exe')"
@@ -89,7 +89,7 @@ def build(output: Path, compiler: Path):
         ("QUICK-START.txt", "Быстрый старт.txt"),
     ):
         shutil.copy2(project / "docs" / source, bundle / destination)
-    (bundle / "Показ механику.cmd").write_bytes(
+    (bundle / "Демонстрационный режим.cmd").write_bytes(
         b'@echo off\r\nstart "" "%~dp0AutoService.exe" --demo\r\n'
     )
     shutil.copy2(project / "docs" / "THIRD-PARTY.txt", bundle / "Сторонние компоненты.txt")

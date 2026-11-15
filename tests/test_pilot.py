@@ -20,7 +20,7 @@ def test_demo_is_separate_persistent_and_does_not_touch_working_database(
     try:
         assert demo.db_path != working.db_path
         assert demo.records.vehicles() == []
-        assert "показ механику" in demo.windowTitle()
+        assert "демонстрационный режим" in demo.windowTitle()
         demo.records.save_vehicle({"plate": "ПРОБНАЯ"})
         assert database_path().read_bytes() == before
         assert working.records.vehicles()[0]["id"] == work_car

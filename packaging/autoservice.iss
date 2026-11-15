@@ -12,7 +12,7 @@
 AppId={{A3553935-C9A5-40F9-9266-ABDC9A3C44CE}
 AppName=AutoService
 AppVersion={#AppVersion}
-AppVerName=AutoService {#AppVersion} — пилотная версия
+AppVerName=AutoService {#AppVersion}
 DefaultDirName={localappdata}\Programs\AutoService
 DefaultGroupName=AutoService
 PrivilegesRequired=lowest
@@ -39,9 +39,13 @@ Name: "desktopicon"; Description: "Создать ярлык на рабочем
 [Files]
 Source: "{#BundleDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[InstallDelete]
+Type: files; Name: "{app}\Показ механику.cmd"
+Type: files; Name: "{group}\Показ механику (отдельные данные).lnk"
+
 [Icons]
 Name: "{group}\AutoService"; Filename: "{app}\AutoService.exe"
-Name: "{group}\Показ механику (отдельные данные)"; Filename: "{app}\AutoService.exe"; Parameters: "--demo"
+Name: "{group}\Демонстрационный режим"; Filename: "{app}\AutoService.exe"; Parameters: "--demo"
 Name: "{group}\Инструкция"; Filename: "{app}\Инструкция.txt"
 Name: "{autodesktop}\AutoService"; Filename: "{app}\AutoService.exe"; Tasks: desktopicon
 
