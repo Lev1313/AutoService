@@ -41,6 +41,7 @@ Source: "{#BundleDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 
 [Icons]
 Name: "{group}\AutoService"; Filename: "{app}\AutoService.exe"
+Name: "{group}\Показ механику (отдельные данные)"; Filename: "{app}\AutoService.exe"; Parameters: "--demo"
 Name: "{group}\Инструкция"; Filename: "{app}\Инструкция.txt"
 Name: "{autodesktop}\AutoService"; Filename: "{app}\AutoService.exe"; Tasks: desktopicon
 

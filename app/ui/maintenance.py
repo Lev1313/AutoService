@@ -347,6 +347,9 @@ class CallsPage(QWidget):
         title = plain_label(heading)
         title.setObjectName("title")
         layout.addWidget(title)
+        layout.addWidget(
+            plain_label("Кому позвонить для приглашения на ТО. Это не запись машин на ремонт.")
+        )
         mode_row = QHBoxLayout()
         self.view_mode = QComboBox()
         self.view_mode.addItem("Список", "list")
@@ -471,6 +474,12 @@ class CallsPage(QWidget):
                 )
             else:
                 self.rows = filtered
+            self.empty.setText(
+                "Правила ТО добавляются в карточке автомобиля: «ТО и напоминания»."
+                if self.rows
+                else "По выбранной дате или фильтру звонков нет. Проверьте «Все открытые» "
+                "и «Уточнить срок». Правила ТО задаются в карточке автомобиля."
+            )
             self.table.setRowCount(len(self.rows))
             for index, task in enumerate(self.rows):
                 for column, value in enumerate(

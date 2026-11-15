@@ -214,6 +214,10 @@ class CustomersPage(QWidget):
         self.refresh()
 
     def refresh(self):
+        previous = self.table.currentRow()
+        selected_id = (
+            self.rows[previous]["id"] if 0 <= previous < len(getattr(self, "rows", [])) else None
+        )
         try:
             self.rows = self.records.find_contacts(self.search.text())
         except ERRORS as error:
@@ -232,11 +236,17 @@ class CustomersPage(QWidget):
         self.empty.setText(
             f"Найдено: {len(self.rows)}"
             if self.rows
-            else "Клиенты не найдены. Измените поиск или добавьте клиента."
+            else (
+                "Клиенты не найдены. Измените поиск или добавьте клиента."
+                if self.search.text().strip()
+                else "Здесь появятся клиенты, добавленные отдельно или вместе с автомобилем."
+            )
         )
         self.open_button.setEnabled(bool(self.rows))
         if self.rows:
-            self.table.selectRow(0)
+            self.table.selectRow(
+                next((i for i, row in enumerate(self.rows) if row["id"] == selected_id), 0)
+            )
 
     def add_customer(self):
         dialog = CustomerDialog(self.records, parent=self)

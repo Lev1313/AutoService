@@ -84,7 +84,14 @@ def build(output: Path, compiler: Path):
     bundle = output / "dist" / "AutoService"
     if list((bundle / "_internal").glob("icu*.dll")):
         raise RuntimeError("Упаковщик захватил стороннюю ICU вместо системной. Выпуск остановлен.")
-    shutil.copy2(project / "docs" / "OWNER-GUIDE.txt", bundle / "Инструкция.txt")
+    for source, destination in (
+        ("OWNER-GUIDE.txt", "Инструкция.txt"),
+        ("QUICK-START.txt", "Быстрый старт.txt"),
+    ):
+        shutil.copy2(project / "docs" / source, bundle / destination)
+    (bundle / "Показ механику.cmd").write_bytes(
+        b'@echo off\r\nstart "" "%~dp0AutoService.exe" --demo\r\n'
+    )
     shutil.copy2(project / "docs" / "THIRD-PARTY.txt", bundle / "Сторонние компоненты.txt")
     license_root = bundle / "licenses"
     license_root.mkdir()

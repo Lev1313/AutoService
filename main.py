@@ -10,7 +10,7 @@ def main() -> int:
         return command(sys.argv[1:])
     from app.bootstrap import run
 
-    return run()
+    return run(demo=sys.argv[1:] == ["--demo"])
 
 
 if __name__ == "__main__":

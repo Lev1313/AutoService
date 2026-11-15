@@ -22,11 +22,12 @@ from PySide6.QtWidgets import (
 from app.database.connection import backup_database, restore_database
 from app.services.records import Records
 from app.ui.customers import CustomersPage
+from app.ui.help import HelpDialog
 from app.ui.maintenance import CallsPage
 from app.ui.vehicles import VehiclesPage
 from app.version import VERSION
 
-SECTIONS = ("Автомобили", "Клиенты", "Звонки", "Финансы", "Настройки")
+SECTIONS = ("Автомобили", "Клиенты", "Звонки", "Настройки")
 
 STYLESHEET = """
 QWidget { color: #243247; font-family: 'Segoe UI'; font-size: 10pt; }
@@ -59,9 +60,11 @@ def label(text: str, name: str = "", wrap: bool = False) -> QLabel:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, *, demo: bool = False) -> None:
         super().__init__()
         self.setWindowTitle("АвтоСервис — учёт автомобилей и ремонтов")
+        if demo:
+            self.setWindowTitle(self.windowTitle() + " — показ механику")
         self.resize(1100, 720)
         self.setMinimumSize(800, 540)
         self.setStyleSheet(STYLESHEET)
@@ -76,12 +79,21 @@ class MainWindow(QMainWindow):
         side_layout = QVBoxLayout(sidebar)
         side_layout.setContentsMargins(18, 25, 18, 18)
         side_layout.addWidget(label("АвтоСервис", "brand"))
-        side_layout.addWidget(label("Рабочее пространство", "muted"))
+        side_layout.addWidget(
+            label(
+                "Показ механику · отдельные данные" if demo else "Рабочее пространство",
+                "muted",
+                True,
+            )
+        )
         side_layout.addSpacing(24)
         self.navigation = QListWidget()
         self.navigation.setAccessibleName("Разделы программы")
         self.navigation.addItems(SECTIONS)
         side_layout.addWidget(self.navigation)
+        self.help_button = QPushButton("Инструкция · F1")
+        self.help_button.clicked.connect(self.show_help)
+        side_layout.addWidget(self.help_button)
         side_layout.addWidget(label("Локально · Без интернета", "muted"))
         side_layout.addWidget(label("Автомобили · Ремонты · ТО", "muted"))
         layout.addWidget(sidebar)
@@ -132,10 +144,6 @@ class MainWindow(QMainWindow):
                 document_settings = QPushButton("Реквизиты для квитанций")
                 document_settings.clicked.connect(self.document_settings)
                 content.addWidget(document_settings)
-            else:
-                content.addWidget(label("Будет реализовано позже", "badge"))
-                description = "Финансовый учёт отложен до отдельного согласования."
-                content.addWidget(label(description, "muted", True))
             if name != "Автомобили":
                 content.addStretch()
             self.pages.addWidget(page)
@@ -146,14 +154,15 @@ class MainWindow(QMainWindow):
         self.navigation.setCurrentRow(0)
         self.navigation.setFocus()
         self.statusBar().showMessage(
-            f"Версия {VERSION} · Пилот  ·  Разделы: Ctrl+1…{len(SECTIONS)}"
-            "  ·  Навигация: Tab и стрелки"
+            f"Версия {VERSION} · Пилот  ·  Разделы: Ctrl+1…{len(SECTIONS)}  ·  Инструкция: F1"
         )
         for index in range(len(SECTIONS)):
             shortcut = QShortcut(QKeySequence(f"Ctrl+{index + 1}"), self)
             shortcut.activated.connect(lambda row=index: self.navigation.setCurrentRow(row))
         search_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
         search_shortcut.activated.connect(self.focus_search)
+        help_shortcut = QShortcut(QKeySequence("F1"), self)
+        help_shortcut.activated.connect(self.show_help)
 
     def refresh_page(self, index):
         page = self.pages.widget(index)
@@ -163,9 +172,15 @@ class MainWindow(QMainWindow):
             self.calls_page.refresh()
 
     def focus_search(self):
-        self.navigation.setCurrentRow(self.pages.indexOf(self.vehicles_page))
-        self.vehicles_page.search.setFocus()
-        self.vehicles_page.search.selectAll()
+        page = self.pages.currentWidget()
+        if page not in (self.vehicles_page, self.customers_page):
+            page = self.vehicles_page
+            self.navigation.setCurrentRow(self.pages.indexOf(page))
+        page.search.setFocus()
+        page.search.selectAll()
+
+    def show_help(self):
+        HelpDialog(self).exec()
 
     def document_settings(self):
         from app.services.documents import Documents

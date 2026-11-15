@@ -35,6 +35,7 @@ from app.services.maintenance import Maintenance
 from app.services.records import Records
 from app.services.txt_import import TxtImport
 from app.ui.documents import DocumentDialog, print_pdf
+from app.ui.help import HelpDialog
 from app.version import VERSION
 
 MARKER = "AutoService synthetic release check v1"
@@ -258,7 +259,7 @@ def reopen(root, report):
             window.navigation.setCurrentRow(index)
             application.processEvents()
             check(window.pages.currentIndex() == index, "Переключение раздела")
-        check(window.navigation.count() == 5, "Единый раздел звонков")
+        check(window.navigation.count() == 4, "Рабочие разделы без Финансов")
         window.navigation.setCurrentRow(window.pages.indexOf(window.calls_page))
         window.calls_page.view_mode.setCurrentIndex(1)
         window.calls_page.calendar.setSelectedDate(QDate(2026, 12, 1))
@@ -276,6 +277,19 @@ def reopen(root, report):
         QTest.qWait(350)
         check(window.vehicles_page.table.rowCount() == 1, "Поиск в собранном интерфейсе")
         check(window.grab().save(str(root / "window.png")), "Снимок окна")
+
+        help_dialog = HelpDialog(window)
+        check(help_dialog.tabs.count() == 2, "Только инструкция в приложении")
+        for index in range(2):
+            check(
+                len(help_dialog.tabs.widget(index).toPlainText()) > 500,
+                "Инструкция в комплекте EXE",
+            )
+        help_dialog.show()
+        QTest.qWait(200)
+        check(help_dialog.grab().save(str(root / "help-window.png")), "Снимок инструкции")
+        help_dialog.close()
+        check(window.navigation.count() == 4, "Четыре рабочих раздела")
 
         buffer = QBuffer()
         buffer.setData(content)

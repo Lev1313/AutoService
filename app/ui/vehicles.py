@@ -741,6 +741,10 @@ class VehiclesPage(QWidget):
         self.refresh()
 
     def refresh(self):
+        previous = self.table.currentRow()
+        selected_id = (
+            self.rows[previous]["id"] if 0 <= previous < len(getattr(self, "rows", [])) else None
+        )
         try:
             self.rows = self.records.vehicles(self.search.text())
         except ERRORS as error:
@@ -759,11 +763,17 @@ class VehiclesPage(QWidget):
         self.empty.setText(
             f"Найдено: {len(self.rows)}"
             if self.rows
-            else "Ничего не найдено. Измените поиск или добавьте автомобиль."
+            else (
+                "Ничего не найдено. Измените поиск или добавьте автомобиль."
+                if self.search.text().strip()
+                else "Начните с «Добавить автомобиль». Затем откройте карточку и добавьте ремонт."
+            )
         )
         self.open_button.setEnabled(bool(self.rows))
         if self.rows:
-            self.table.selectRow(0)
+            self.table.selectRow(
+                next((i for i, row in enumerate(self.rows) if row["id"] == selected_id), 0)
+            )
 
     def add_vehicle(self):
         dialog = VehicleDialog(self.records, parent=self)

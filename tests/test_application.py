@@ -52,6 +52,10 @@ def test_window_and_navigation(application, tmp_path):
         assert window.pages.currentWidget() is window.customers_page
         assert window.navigation.currentItem().text() == "Клиенты"
         window.focus_search()
+        assert window.pages.currentWidget() is window.customers_page
+        assert window.customers_page.search.hasFocus()
+        window.navigation.setCurrentRow(0)
+        window.focus_search()
         assert window.pages.currentWidget() is window.vehicles_page
         table = window.vehicles_page.table
         assert table.rowCount() == 0
