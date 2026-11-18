@@ -189,3 +189,77 @@ def test_customer_page_refreshes_existing_contacts_after_navigation(application,
     window.navigation.setCurrentRow(1)
     assert window.customers_page.table.item(0, 0).text() == "Исправлен"
     window.close()
+
+
+def test_catalog_overlay_keeps_source_and_separates_sport_models(records):
+    import hashlib
+    from pathlib import Path
+
+    from app.services.catalog import name_key
+
+    source = Path(__file__).resolve().parents[1] / "app/assets/car_models.json"
+    assert hashlib.sha256(source.read_bytes().replace(b"\r\n", b"\n")).hexdigest() == (
+        "42c74b1906cd43ff119081ad6dda1f015424b43c642c17eb436d5e252ec04f3b"
+    )
+    catalog = VehicleCatalog(records)
+    for make in builtin_catalog():
+        names = catalog.models(make)
+        assert not any("serisi" in name.casefold() for name in names)
+        assert len(names) == len({name_key(name) for name in names})
+    assert {"1 серия", "1M", "M1", "3 серия", "M3", "X3", "X3 M"} <= set(catalog.models("БМВ"))
+    assert {"A-класс", "C-класс", "E-класс", "W123", "W124", "GLC", "SLK"} <= set(
+        catalog.models("Мерседес-Бенц")
+    )
+    assert "3 серия" not in catalog.models("Mercedes-Benz")
+
+
+def test_catalog_legacy_names_deduplicate_without_changing_records(records):
+    cars = []
+    for model in ("3 Serisi (M3)", "3 Series", "3 серия", "Свой BMW 3", "X3M"):
+        cars.append((records.save_vehicle({"make": "BMW", "model": model}), model))
+    catalog = VehicleCatalog(Records(records.path))
+    assert catalog.models("BMW").count("3 серия") == 1
+    assert catalog.models("BMW").count("X3 M") == 1
+    assert "Свой BMW 3" in catalog.models("BMW")
+    assert not any("Serisi" in name for name in catalog.models("BMW"))
+    for vehicle_id, model in cars:
+        assert Records(records.path).vehicle(vehicle_id)["model"] == model
+    records.save_vehicle({"make": "Своя марка", "model": "3 Serisi"})
+    assert catalog.models("Своя марка") == ["3 Serisi"]
+
+
+def test_model_alias_completion_inserts_display_name_and_preserves_old_card(application, records):
+    vehicle_id = records.save_vehicle({"make": "BMW", "model": "3 Serisi (M3)"})
+    dialog = VehicleDialog(records, vehicle_id)
+    assert dialog.fields["model"].text() == "3 Serisi (M3)"
+    assert dialog.state() == dialog.original
+    completer = dialog.model_completer
+    for query, expected in (("3 series", "3 серия"), ("3 serisi", "3 серия"), ("X3M", "X3 M")):
+        completer.setCompletionPrefix(query)
+        model = completer.completionModel()
+        labels = [model.index(row, 0).data() for row in range(model.rowCount())]
+        assert expected in labels
+        index = model.index(labels.index(expected), 0)
+        assert completer.pathFromIndex(index) == expected
+    dialog.show()
+    application.processEvents()
+    dialog.fields["model"].setFocus()
+    dialog.fields["model"].setText("3 series")
+    completer.setCompletionPrefix("3 series")
+    completer.complete()
+    application.processEvents()
+    popup = completer.popup()
+    index = completer.completionModel().index(0, 0)
+    popup.setCurrentIndex(index)
+    QTest.mouseClick(
+        popup.viewport(), Qt.MouseButton.LeftButton, pos=popup.visualRect(index).center()
+    )
+    assert dialog.fields["model"].text() == "3 серия"
+    assert records.vehicle(vehicle_id)["model"] == "3 Serisi (M3)"
+    dialog.save()
+    assert Records(records.path).vehicle(vehicle_id)["model"] == "3 серия"
+    second = VehicleDialog(records)
+    second.fields["make"].setText("Mercedes")
+    second.model_completer.setCompletionPrefix("c-class")
+    assert second.model_completer.completionModel().index(0, 0).data() == "C-класс"
+    second.done(0)
