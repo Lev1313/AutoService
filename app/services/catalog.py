@@ -47,12 +47,48 @@ ALIASES = {
     "ауди": "audi",
     "тойота": "toyota",
     "рено": "renault",
+    "мерседес": "mercedesbenz",
+    "мерседесбенц": "mercedesbenz",
+    "mercedes": "mercedesbenz",
 }
 
 
 def make_key(value):
     key = name_key(value)
     return ALIASES.get(key, key)
+
+
+@lru_cache(maxsize=1)
+def model_overrides():
+    """Точные соответствия; составная строка предлагает несколько вариантов."""
+    path = Path(__file__).resolve().parents[1] / "assets" / "car_models.overrides.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("version") != 1:
+        raise ValueError("Неподдерживаемая версия исправлений каталога.")
+    result = {}
+    for rule in data["rules"]:
+        targets = tuple(rule["targets"])
+        for alias in (rule["source"], *rule["aliases"]):
+            key = (make_key(rule["make"]), name_key(alias))
+            previous = result.get(key)
+            if previous is not None and previous != targets:
+                raise ValueError(f"Неоднозначное соответствие каталога: {alias}")
+            result[key] = targets
+    return result
+
+
+def model_names(make, value):
+    return model_overrides().get((make_key(make), name_key(value)), (value,))
+
+
+def model_search_text(make, model):
+    """Поиск по прежним подписям без показа дублей в выпадающем списке."""
+    key = make_key(make)
+    aliases = [name_key(model)]
+    for (brand, alias), targets in model_overrides().items():
+        if brand == key and model in targets:
+            aliases.append(alias)
+    return "|".join(aliases)
 
 
 class VehicleCatalog:
@@ -89,4 +125,4 @@ class VehicleCatalog:
         values.extend(
             row["model"] for row in self.records.vehicle_names() if make_key(row["make"]) == key
         )
-        return unique_names(values)
+        return unique_names(name for value in values for name in model_names(make, value))

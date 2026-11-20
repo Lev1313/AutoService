@@ -1,0 +1,722 @@
+{
+  "version": 1,
+  "source_sha256": "42c74b1906cd43ff119081ad6dda1f015424b43c642c17eb436d5e252ec04f3b",
+  "rules": [
+    {
+      "make": "BMW",
+      "source": "1 Serisi (1M)",
+      "targets": [
+        "1 серия",
+        "1M"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "BMW",
+      "source": "1 Serisi",
+      "targets": [
+        "1 серия"
+      ],
+      "aliases": [
+        "1 Series",
+        "1-series"
+      ]
+    },
+    {
+      "make": "BMW",
+      "source": "2 Serisi",
+      "targets": [
+        "2 серия"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "BMW",
+      "source": "2 Serisi",
+      "targets": [
+        "2 серия"
+      ],
+      "aliases": [
+        "2 Series",
+        "2-series"
+      ]
+    },
+    {
+      "make": "BMW",
+      "source": "3 Serisi (M3)",
+      "targets": [
+        "3 серия",
+        "M3"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "BMW",
+      "source": "3 Serisi",
+      "targets": [
+        "3 серия"
+      ],
+      "aliases": [
+        "3 Series",
+        "3-series"
+      ]
+    },
+    {
+      "make": "BMW",
+      "source": "4 Serisi (M4)",
+      "targets": [
+        "4 серия",
+        "M4"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "BMW",
+      "source": "4 Serisi",
+      "targets": [
+        "4 серия"
+      ],
+      "aliases": [
+        "4 Series",
+        "4-series"
+      ]
+    },
+    {
+      "make": "BMW",
+      "source": "5 Serisi (M5)",
+      "targets": [
+        "5 серия",
+        "M5"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "BMW",
+      "source": "5 Serisi",
+      "targets": [
+        "5 серия"
+      ],
+      "aliases": [
+        "5 Series",
+        "5-series"
+      ]
+    },
+    {
+      "make": "BMW",
+      "source": "6 Serisi (M6)",
+      "targets": [
+        "6 серия",
+        "M6"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "BMW",
+      "source": "6 Serisi",
+      "targets": [
+        "6 серия"
+      ],
+      "aliases": [
+        "6 Series",
+        "6-series"
+      ]
+    },
+    {
+      "make": "BMW",
+      "source": "7 Serisi",
+      "targets": [
+        "7 серия"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "BMW",
+      "source": "7 Serisi",
+      "targets": [
+        "7 серия"
+      ],
+      "aliases": [
+        "7 Series",
+        "7-series"
+      ]
+    },
+    {
+      "make": "BMW",
+      "source": "8 Serisi (M8)",
+      "targets": [
+        "8 серия",
+        "M8"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "BMW",
+      "source": "8 Serisi",
+      "targets": [
+        "8 серия"
+      ],
+      "aliases": [
+        "8 Series",
+        "8-series"
+      ]
+    },
+    {
+      "make": "BMW",
+      "source": "X3 (X3M)",
+      "targets": [
+        "X3",
+        "X3 M"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "BMW",
+      "source": "X3M",
+      "targets": [
+        "X3 M"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "BMW",
+      "source": "X4 (X4M)",
+      "targets": [
+        "X4",
+        "X4 M"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "BMW",
+      "source": "X4M",
+      "targets": [
+        "X4 M"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "BMW",
+      "source": "X5 (X5M)",
+      "targets": [
+        "X5",
+        "X5 M"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "BMW",
+      "source": "X5M",
+      "targets": [
+        "X5 M"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "BMW",
+      "source": "X6 (X6M)",
+      "targets": [
+        "X6",
+        "X6 M"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "BMW",
+      "source": "X6M",
+      "targets": [
+        "X6 M"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "BMW",
+      "source": "1 Series M Coupe",
+      "targets": [
+        "1M"
+      ],
+      "aliases": [
+        "1 Series M Coupé",
+        "1 серия M Купе"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "A-Serisi",
+      "targets": [
+        "A-класс"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "A-Class",
+      "targets": [
+        "A-класс"
+      ],
+      "aliases": [
+        "A-класс",
+        "A-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "B-Serisi",
+      "targets": [
+        "B-класс"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "B-Class",
+      "targets": [
+        "B-класс"
+      ],
+      "aliases": [
+        "B-класс",
+        "B-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "C-Serisi",
+      "targets": [
+        "C-класс"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "C-Class",
+      "targets": [
+        "C-класс"
+      ],
+      "aliases": [
+        "C-класс",
+        "C-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "CL-Serisi",
+      "targets": [
+        "CL"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "CL-Class",
+      "targets": [
+        "CL"
+      ],
+      "aliases": [
+        "CL-класс",
+        "CL-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "CLA-Serisi",
+      "targets": [
+        "CLA"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "CLA-Class",
+      "targets": [
+        "CLA"
+      ],
+      "aliases": [
+        "CLA-класс",
+        "CLA-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "CLC-Serisi",
+      "targets": [
+        "CLC"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "CLC-Class",
+      "targets": [
+        "CLC"
+      ],
+      "aliases": [
+        "CLC-класс",
+        "CLC-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "CLK-Serisi",
+      "targets": [
+        "CLK"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "CLK-Class",
+      "targets": [
+        "CLK"
+      ],
+      "aliases": [
+        "CLK-класс",
+        "CLK-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "CLS-Serisi",
+      "targets": [
+        "CLS"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "CLS-Class",
+      "targets": [
+        "CLS"
+      ],
+      "aliases": [
+        "CLS-класс",
+        "CLS-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "E-Serisi (W123, W124)",
+      "targets": [
+        "E-класс",
+        "W123",
+        "W124"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "E-Class",
+      "targets": [
+        "E-класс"
+      ],
+      "aliases": [
+        "E-класс",
+        "E-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "G-Serisi",
+      "targets": [
+        "G-класс"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "G-Class",
+      "targets": [
+        "G-класс"
+      ],
+      "aliases": [
+        "G-класс",
+        "G-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "GL-Serisi",
+      "targets": [
+        "GL"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "GL-Class",
+      "targets": [
+        "GL"
+      ],
+      "aliases": [
+        "GL-класс",
+        "GL-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "GLA-Serisi",
+      "targets": [
+        "GLA"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "GLA-Class",
+      "targets": [
+        "GLA"
+      ],
+      "aliases": [
+        "GLA-класс",
+        "GLA-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "GLB-Serisi",
+      "targets": [
+        "GLB"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "GLB-Class",
+      "targets": [
+        "GLB"
+      ],
+      "aliases": [
+        "GLB-класс",
+        "GLB-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "GLC-Serisi",
+      "targets": [
+        "GLC"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "GLC-Class",
+      "targets": [
+        "GLC"
+      ],
+      "aliases": [
+        "GLC-класс",
+        "GLC-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "GLE-Serisi",
+      "targets": [
+        "GLE"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "GLE-Class",
+      "targets": [
+        "GLE"
+      ],
+      "aliases": [
+        "GLE-класс",
+        "GLE-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "GLK-Serisi",
+      "targets": [
+        "GLK"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "GLK-Class",
+      "targets": [
+        "GLK"
+      ],
+      "aliases": [
+        "GLK-класс",
+        "GLK-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "GLS-Serisi",
+      "targets": [
+        "GLS"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "GLS-Class",
+      "targets": [
+        "GLS"
+      ],
+      "aliases": [
+        "GLS-класс",
+        "GLS-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "M-Serisi",
+      "targets": [
+        "M-класс"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "M-Class",
+      "targets": [
+        "M-класс"
+      ],
+      "aliases": [
+        "M-класс",
+        "M-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "R-Serisi",
+      "targets": [
+        "R-класс"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "R-Class",
+      "targets": [
+        "R-класс"
+      ],
+      "aliases": [
+        "R-класс",
+        "R-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "S-Serisi (W126, W140)",
+      "targets": [
+        "S-класс"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "S-Class",
+      "targets": [
+        "S-класс"
+      ],
+      "aliases": [
+        "S-класс",
+        "S-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "SL-Serisi",
+      "targets": [
+        "SL"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "SL-Class",
+      "targets": [
+        "SL"
+      ],
+      "aliases": [
+        "SL-класс",
+        "SL-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "SLC-Serisi",
+      "targets": [
+        "SLC"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "SLC-Class",
+      "targets": [
+        "SLC"
+      ],
+      "aliases": [
+        "SLC-класс",
+        "SLC-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "SLK-Serisi",
+      "targets": [
+        "SLK"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "SLK-Class",
+      "targets": [
+        "SLK"
+      ],
+      "aliases": [
+        "SLK-класс",
+        "SLK-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "V-Serisi",
+      "targets": [
+        "V-класс"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "V-Class",
+      "targets": [
+        "V-класс"
+      ],
+      "aliases": [
+        "V-класс",
+        "V-Serisi"
+      ]
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "X-Serisi",
+      "targets": [
+        "X-класс"
+      ],
+      "aliases": []
+    },
+    {
+      "make": "Mercedes-Benz",
+      "source": "X-Class",
+      "targets": [
+        "X-класс"
+      ],
+      "aliases": [
+        "X-класс",
+        "X-Serisi"
+      ]
+    }
+  ],
+  "reviewed_on": "2026-11-18",
+  "review_notes": "docs/VEHICLE-CATALOG.md; targets are choices, not equivalence of models"
+}
