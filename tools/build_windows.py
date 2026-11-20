@@ -89,8 +89,17 @@ def build(output: Path, compiler: Path):
     for source, destination in (
         ("OWNER-GUIDE.txt", "Инструкция.txt"),
         ("QUICK-START.txt", "Быстрый старт.txt"),
+        ("SHOW-GUIDE.txt", "Как провести показ.txt"),
     ):
         shutil.copy2(project / "docs" / source, bundle / destination)
+    subprocess.run(
+        [sys.executable, "-m", "tools.make_print_guide", "--output", str(output)],
+        cwd=project,
+        env=environment,
+        check=True,
+    )
+    guide = output / f"AutoService-{version}-Руководство-пользователя.pdf"
+    shutil.copy2(guide, bundle / "Руководство пользователя.pdf")
     (bundle / "Демонстрационный режим.cmd").write_bytes(
         b'@echo off\r\nstart "" "%~dp0AutoService.exe" --demo\r\n'
     )
@@ -145,7 +154,7 @@ def build(output: Path, compiler: Path):
         bundle.parent,
         bundle.name,
     )
-    files = sorted(output.glob("*.exe")) + sorted(output.glob("*.zip"))
+    files = sorted(output.glob("*.exe")) + sorted(output.glob("*.zip")) + [guide]
     (output / "SHA256SUMS.txt").write_text(
         "\n".join(f"{hashlib.sha256(file.read_bytes()).hexdigest()}  {file.name}" for file in files)
         + "\n",

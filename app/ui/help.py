@@ -1,9 +1,12 @@
 """Локальные инструкции: те же файлы, которые поставляются с выпуском."""
 
 import sys
+from html import escape
 from pathlib import Path
 
-from PySide6.QtWidgets import QDialog, QDialogButtonBox, QPlainTextEdit, QTabWidget, QVBoxLayout
+from PySide6.QtWidgets import QDialog, QDialogButtonBox, QTabWidget, QTextBrowser, QVBoxLayout
+
+from app.guide_text import guide_blocks
 
 GUIDES = (
     ("Начать работу", "QUICK-START.txt", "Быстрый старт.txt"),
@@ -25,15 +28,24 @@ class HelpDialog(QDialog):
         self.setMinimumSize(550, 420)
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
+        tags = {"title": "h1", "chapter": "h2", "heading": "h3", "body": "p"}
         for title, source_name, release_name in GUIDES:
-            text = QPlainTextEdit()
-            text.setReadOnly(True)
+            text = QTextBrowser()
             text.setAccessibleName(title)
             try:
                 content = guide_path(source_name, release_name).read_text(encoding="utf-8-sig")
             except (OSError, UnicodeError):
-                content = "Не удалось прочитать инструкцию. Проверьте комплектность программы."
-            text.setPlainText(content)
+                text.setPlainText(
+                    "Не удалось прочитать инструкцию. Проверьте комплектность программы."
+                )
+            else:
+                text.setHtml(
+                    "".join(
+                        f"<{tags[kind]}>{escape(block)}</{tags[kind]}>"
+                        for kind, block in guide_blocks(content)
+                    )
+                )
+                text.document().setDocumentMargin(16)
             self.tabs.addTab(text, title)
         layout.addWidget(self.tabs)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)

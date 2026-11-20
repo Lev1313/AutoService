@@ -1,432 +1,119 @@
-"""Печатное руководство пользователя AutoService, четыре страницы А4."""
+"""Build the versioned A4 guide from the text used by the in-app help."""
 
 import argparse
+import os
+import sys
+from html import escape
 from pathlib import Path
 
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.colors import HexColor
+from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import (
-    BaseDocTemplate,
-    Frame,
-    KeepTogether,
-    PageBreak,
-    PageTemplate,
-    Paragraph,
-    Spacer,
-    Table,
-    TableStyle,
-)
+from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate
 
-parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("--output", type=Path, required=True, help="Каталог готовой PDF-инструкции")
-OUT = parser.parse_args().output.resolve()
-OUT.mkdir(parents=True, exist_ok=True)
-PDF = OUT / "AutoService-0.5.1-Руководство-пользователя.pdf"
+ROOT = Path(__file__).resolve().parents[1]
+if __package__ is None:
+    sys.path.insert(0, str(ROOT))
 
-pdfmetrics.registerFont(TTFont("Arial", "C:/Windows/Fonts/arial.ttf"))
-pdfmetrics.registerFont(TTFont("Arial-Bold", "C:/Windows/Fonts/arialbd.ttf"))
-pdfmetrics.registerFontFamily(
-    "Arial", normal="Arial", bold="Arial-Bold", italic="Arial", boldItalic="Arial-Bold"
-)
+from app.guide_text import guide_blocks  # noqa: E402
+from app.version import VERSION  # noqa: E402
 
-INK = colors.HexColor("#17212c")
-MUTED = colors.HexColor("#4b5563")
-RULE = colors.HexColor("#c8cdd2")
-WIDTH, HEIGHT = 210 * mm, 297 * mm
-styles = {
-    "title": ParagraphStyle(
-        "title", fontName="Arial-Bold", fontSize=22, leading=27, textColor=INK, spaceAfter=9
-    ),
-    "subtitle": ParagraphStyle(
-        "subtitle", fontName="Arial", fontSize=11, leading=15, textColor=MUTED, spaceAfter=12
-    ),
-    "h": ParagraphStyle(
-        "h",
-        fontName="Arial-Bold",
-        fontSize=13,
-        leading=17,
-        textColor=INK,
-        spaceBefore=12,
-        spaceAfter=6,
-        keepWithNext=True,
-    ),
-    "body": ParagraphStyle(
-        "body", fontName="Arial", fontSize=11.5, leading=16, textColor=INK, spaceAfter=7
-    ),
-    "small": ParagraphStyle(
-        "small", fontName="Arial", fontSize=10.3, leading=14, textColor=MUTED, spaceAfter=6
-    ),
-    "cell": ParagraphStyle(
-        "cell", fontName="Arial", fontSize=11, leading=15, textColor=INK, alignment=TA_LEFT
-    ),
-}
-story = []
+INK = HexColor("#243247")
+BLUE = HexColor("#174b9a")
+MUTED = HexColor("#56647a")
+RULE = HexColor("#d8e2ee")
+MARGIN = 18 * mm
 
 
-def p(text, style="body"):
-    story.append(Paragraph(text, styles[style]))
-
-
-def h(text):
-    p(text, "h")
-
-
-def steps(*items):
-    for index, item in enumerate(items, 1):
-        p(f"<b>{index}.</b> {item}")
-
-
-def box(title, text):
-    content = [Paragraph(title, styles["h"]), Paragraph(text, styles["body"])]
-    table = Table([[content]], colWidths=[174 * mm])
-    table.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f3f4f5")),
-                ("BOX", (0, 0), (-1, -1), 0.6, RULE),
-                ("LEFTPADDING", (0, 0), (-1, -1), 10),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 10),
-                ("TOPPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-            ]
+def build_guide(output_dir):
+    font_dir = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
+    pdfmetrics.registerFont(TTFont("Guide", str(font_dir / "arial.ttf")))
+    pdfmetrics.registerFont(TTFont("Guide-Bold", str(font_dir / "arialbd.ttf")))
+    pdfmetrics.registerFontFamily("Guide", normal="Guide", bold="Guide-Bold")
+    styles = {
+        "chapter": ParagraphStyle(
+            "Chapter",
+            fontName="Guide-Bold",
+            fontSize=25,
+            leading=29,
+            textColor=INK,
+            spaceAfter=13,
+            keepWithNext=True,
+        ),
+        "heading": ParagraphStyle(
+            "Heading",
+            fontName="Guide-Bold",
+            fontSize=10.5,
+            leading=14,
+            textColor=BLUE,
+            spaceBefore=9,
+            spaceAfter=4,
+            keepWithNext=True,
+        ),
+        "body": ParagraphStyle(
+            "Body",
+            fontName="Guide",
+            fontSize=11,
+            leading=15.5,
+            textColor=INK,
+            spaceAfter=7,
+        ),
+    }
+    guide = (ROOT / "docs" / "OWNER-GUIDE.txt").read_text(encoding="utf-8-sig")
+    blocks = list(guide_blocks(guide))
+    page_count = sum(kind == "chapter" for kind, _ in blocks)
+    logo = ImageReader(str(ROOT / "app" / "assets" / "autoservice.ico"))
+    story = []
+    for kind, text in blocks:
+        if kind == "title":
+            continue
+        if kind == "chapter" and story:
+            story.append(PageBreak())
+        number, separator, rest = text.partition(") ")
+        content = (
+            f"<b>{number})</b> {escape(rest)}" if separator and number.isdecimal() else escape(text)
         )
+        story.append(Paragraph(content, styles[kind]))
+
+    def page_furniture(canvas, document):
+        width, height = A4
+        canvas.saveState()
+        canvas.drawImage(logo, MARGIN, height - 16 * mm, 7 * mm, 7 * mm, mask="auto")
+        canvas.setFillColor(INK)
+        canvas.setFont("Guide-Bold", 10)
+        canvas.drawString(MARGIN + 9 * mm, height - 13.8 * mm, "АвтоСервис")
+        canvas.setFont("Guide", 9)
+        canvas.setFillColor(MUTED)
+        canvas.drawRightString(width - MARGIN, height - 13.8 * mm, "Руководство пользователя")
+        canvas.setStrokeColor(RULE)
+        canvas.line(MARGIN, height - 19 * mm, width - MARGIN, height - 19 * mm)
+        canvas.line(MARGIN, 17 * mm, width - MARGIN, 17 * mm)
+        canvas.drawString(MARGIN, 11.5 * mm, f"AutoService {VERSION}")
+        canvas.drawRightString(width - MARGIN, 11.5 * mm, f"{document.page} / {page_count}")
+        canvas.restoreState()
+
+    output_dir = Path(output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output = output_dir / f"AutoService-{VERSION}-Руководство-пользователя.pdf"
+    document = SimpleDocTemplate(
+        str(output),
+        pagesize=A4,
+        leftMargin=MARGIN - 6,
+        rightMargin=MARGIN - 6,
+        topMargin=24 * mm,
+        bottomMargin=22 * mm,
+        title=f"AutoService {VERSION}. Руководство пользователя",
+        author="AutoService",
     )
-    story.append(KeepTogether([Spacer(1, 3 * mm), table, Spacer(1, 2 * mm)]))
+    document.build(story, onFirstPage=page_furniture, onLaterPages=page_furniture)
+    return output
 
 
-def page(title, subtitle):
-    if story:
-        story.append(PageBreak())
-    p(title, "title")
-    p(subtitle, "subtitle")
-
-
-def footer(canvas, doc):
-    canvas.saveState()
-    canvas.setFont("Arial", 9)
-    canvas.setFillColor(MUTED)
-    canvas.drawString(18 * mm, HEIGHT - 12 * mm, "AutoService  |  Руководство пользователя")
-    canvas.setStrokeColor(RULE)
-    canvas.line(18 * mm, 18 * mm, WIDTH - 18 * mm, 18 * mm)
-    canvas.setFont("Arial", 9)
-    canvas.setFillColor(MUTED)
-    canvas.drawString(18 * mm, 12 * mm, "AutoService 0.5.1")
-    canvas.drawRightString(WIDTH - 18 * mm, 12 * mm, f"{doc.page} / 4")
-    canvas.restoreState()
-
-
-def keyboard_table():
-    h("Памятка клавиш")
-    table = Table(
-        [
-            [
-                Paragraph("<b>F1</b> - инструкция в программе", styles["cell"]),
-                Paragraph("<b>Ctrl+S</b> - сохранить форму", styles["cell"]),
-            ],
-            [
-                Paragraph("<b>Ctrl+F</b> - поиск машин / клиентов", styles["cell"]),
-                Paragraph("<b>Esc</b> - закрыть форму", styles["cell"]),
-            ],
-            [
-                Paragraph("<b>Ctrl+1</b> - автомобили", styles["cell"]),
-                Paragraph("<b>Ctrl+2</b> - клиенты", styles["cell"]),
-            ],
-            [
-                Paragraph("<b>Ctrl+3</b> - звонки", styles["cell"]),
-                Paragraph("<b>Ctrl+4</b> - настройки", styles["cell"]),
-            ],
-        ],
-        colWidths=[87 * mm, 87 * mm],
-    )
-    table.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LINEBELOW", (0, 0), (-1, -1), 0.4, RULE),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-            ]
-        )
-    )
-    story.append(table)
-
-
-page("1. Начало работы", "Установка, сведения об автомобиле и первая запись о ремонте.")
-h("Установка и запуск")
-p(
-    "Запустите установщик AutoService и следуйте подсказкам. Затем "
-    "откройте обычный ярлык <b>AutoService</b>. Отдельно "
-    "устанавливать Python не нужно."
-)
-p(
-    (
-        "Для переносимой версии распакуйте <b>архив полностью</b> и запустите "
-        "AutoService.exe. Папка _internal и остальные файлы должны "
-        "оставаться рядом с ним."
-    ),
-    "small",
-)
-box(
-    "Демонстрационный режим",
-    (
-        "Для знакомства с программой выберите в меню «Пуск» "
-        "<b>«Демонстрационный режим»</b>. В переносимой версии откройте "
-        "<b>«Демонстрационный режим.cmd»</b>. Пробные записи хранятся "
-        "отдельно от рабочей базы и сохраняются после закрытия."
-    ),
-)
-h("Добавить автомобиль")
-steps(
-    "В «Автомобилях» нажмите <b>«Добавить автомобиль»</b>.",
-    ("Введите хотя бы марку, модель, госномер или VIN. Остальные поля можно заполнить позже."),
-    (
-        "Укажите клиента и телефон, если они известны. Подсказку можно "
-        "выбрать или ввести свой вариант. Нажмите <b>«Сохранить»</b>."
-    ),
-)
-h("Записать ремонт")
-steps(
-    "В карточке автомобиля нажмите <b>«Добавить ремонт»</b>.",
-    "Укажите дату и опишите работу своими словами. Пробег и стоимость необязательны.",
-    (
-        "Нажмите <b>«Сохранить»</b>, чтобы оставить ремонт текущим, "
-        "или <b>«Завершить ремонт»</b>, чтобы поместить его в "
-        "завершённую историю."
-    ),
-)
-box(
-    "Статус ремонта, стоимость и пробег",
-    (
-        "<b>Пустая стоимость</b> - сумма неизвестна. <b>0 рублей</b> - "
-        "бесплатно.<br/><b>Завершение ремонта</b> не означает "
-        "оплату.<br/><b>Пробег с ?</b> взят из прежнего замера. Он не "
-        "становится новым фактическим пробегом."
-    ),
-)
-keyboard_table()
-
-page("2. Автомобили и ремонты", "Поиск, история обслуживания и исправление записей.")
-h("Поиск и редактирование ремонта")
-steps(
-    (
-        "В «Автомобилях» введите номер, VIN, марку, модель, имя "
-        "клиента или телефон. <b>Ctrl+F</b> переводит курсор в поиск."
-    ),
-    "Откройте автомобиль двойным щелчком по строке или кнопкой <b>«Открыть карточку»</b>.",
-    (
-        "В истории выберите запись. Полный текст виден под таблицей. "
-        "Для правки нажмите <b>«Открыть выбранный ремонт»</b>."
-    ),
-    (
-        "Исправьте текст, дату, пробег или стоимость и сохраните. "
-        "Незаконченный ремонт можно позже завершить."
-    ),
-)
-h("Клиенты и контактные данные")
-p(
-    "В разделе <b>«Клиенты»</b> можно искать по имени или "
-    "телефону, добавить клиента без автомобиля и открыть его "
-    "автомобили. Одному клиенту можно привязать несколько автомобилей."
-)
-p(
-    "<b>Изменение клиента</b> обновляет его имя и телефон во всех "
-    "связанных машинах. Чтобы сменить владельца только одного "
-    "автомобиля, выберите другого клиента при редактировании этого "
-    "автомобиля. История остаётся у автомобиля."
-)
-h("Подтверждение пробега")
-p(
-    "Под старым пробегом с <b>?</b> указана дата исходного замера. "
-    "Введите новое число или отметьте <b>«Пробег измерен при этом "
-    "ремонте»</b>, только если действительно проверили показание. "
-    "При противоречии истории программа попросит уточнение."
-)
-h("Удаление и восстановление ремонта")
-steps(
-    (
-        "Выберите ремонт в карточке машины и нажмите <b>«Удалить "
-        "ремонт»</b>. Прочитайте предупреждение и подтвердите."
-    ),
-    (
-        "Для возврата включите <b>«Показать удалённые ремонты»</b>, "
-        "выберите запись и нажмите <b>«Восстановить ремонт»</b>."
-    ),
-)
-p(
-    (
-        "Выданные PDF и исходные TXT сохраняются. Отдельная отметка "
-        "выполненного ТО не отменяется при удалении ремонта."
-    ),
-    "small",
-)
-box(
-    "Сохранение изменений",
-    (
-        "<b>Ctrl+S</b> сохраняет открытую форму. <b>Esc</b> закрывает "
-        "её; при изменениях программа спросит, сохранить ли их. "
-        "Выберите отмену закрытия, если хотите продолжить ввод."
-    ),
-)
-
-page(
-    "3. ТО, звонки и квитанции",
-    "Настройка обслуживания, обработка звонков и оформление документов.",
-)
-h("Настройка напоминаний о ТО")
-steps(
-    (
-        "В карточке автомобиля откройте <b>«ТО и напоминания»</b> и "
-        "нажмите <b>«Добавить правило»</b>."
-    ),
-    (
-        "Введите название работы, свой интервал в месяцах и/или "
-        "километрах, дату и пробег последнего выполнения, если они "
-        "известны. Укажите, за сколько дней позвонить."
-    ),
-    (
-        "Сохраните правило. После фактического выполнения используйте "
-        "<b>«ТО выполнено»</b> и подтвердите новый цикл."
-    ),
-)
-p(
-    (
-        "Готовых нормативов нет. Прогноз пробега - оценка, а не "
-        "показание одометра. Слово «масло» или другая работа в тексте "
-        "ремонта само по себе не сбрасывает срок ТО."
-    ),
-    "small",
-)
-h("Работа со списком звонков")
-p(
-    "Раздел <b>«Звонки»</b> показывает приглашения на ТО. Это "
-    "<b>не календарь записи на ремонт</b>. Выберите «Список» или "
-    "«Календарь». В календаре выделены дни со звонками; таблица "
-    "показывает выбранный день."
-)
-p(
-    "Если нужной задачи не видно, проверьте фильтр <b>«Все "
-    "открытые»</b> и кнопку <b>«Уточнить срок»</b>. Обработанные "
-    "задачи доступны отдельным фильтром."
-)
-p(
-    "Выберите строку, нажмите <b>«Результат звонка»</b> и отметьте "
-    "исход разговора или перенос. Для возобновления приглашений откройте "
-    "фильтр «Обработанные / отключённые», выберите задачу и результат "
-    "«Вернуть в список звонков». Это включает выбранное правило ТО."
-)
-h("Оформление квитанции")
-steps(
-    ("В карточке автомобиля выберите сохранённый ремонт и нажмите <b>«Документы / Печать»</b>."),
-    (
-        "Введите реквизиты своего сервиса через <b>«Реквизиты "
-        "сервиса»</b>. Выберите простой текст с суммой или подробные "
-        "позиции работ и запчастей."
-    ),
-    ("Нажмите <b>«Предпросмотр»</b> и проверьте документ. Предпросмотр ещё не присваивает номер."),
-    (
-        "Нажмите <b>«Сохранить экземпляр»</b>. После этого доступны "
-        "<b>«Сохранить PDF»</b> и <b>«Печать»</b> с выбором принтера."
-    ),
-)
-box(
-    "Исправление сохранённой квитанции",
-    (
-        "Правка ремонта не меняет уже выданный PDF. Для исправления "
-        "оформите новый экземпляр. Незаконченную детализацию можно "
-        "сохранить как черновик. Если итог позиций отличается от "
-        "стоимости ремонта, проверьте выбранный итог документа."
-    ),
-)
-
-page("4. Сохранность данных", "Резервные копии, перенос данных, импорт и помощь.")
-h("Резервная копия - после работы и перед обновлением")
-steps(
-    "Откройте <b>«Настройки» → «Создать резервную копию»</b>.",
-    (
-        "Выберите флешку или другой диск. Храните несколько копий с "
-        "разными датами. Копия на том же диске не защищает данные при его "
-        "поломки."
-    ),
-)
-p(
-    "Копия содержит автомобили, ремонты, клиентов, ТО, звонки, "
-    "сохранённые PDF и исходные TXT. В демонстрационном режиме "
-    "копируются только пробные данные."
-)
-p(
-    "<b>Для переноса:</b> установите программу на другом "
-    "компьютере, откройте «Настройки» → «Восстановить из копии». "
-    "Восстановление <b>заменяет текущие данные</b>; перед заменой "
-    "программа сохраняет их отдельно. Не выбирайте восстановление "
-    "просто для просмотра файла."
-)
-p(
-    (
-        "<b>Для обновления:</b> сделайте внешнюю копию, закройте "
-        "AutoService и запустите новый установщик. Не удаляйте базу "
-        "при ошибке и не открывайте обновлённую базу старой программой."
-    ),
-    "small",
-)
-h("TXT и Excel: для чтения и передачи")
-p(
-    "«Настройки» → <b>«Экспорт базы в TXT / Excel»</b> → формат и "
-    "папка → «Выгрузить». Результат появится в новой папке. "
-    "Переносите <b>всю папку</b>: длинные тексты и вложения могут "
-    "лежать отдельно от книги. Для восстановления программы нужна "
-    "резервная копия базы, а не Excel."
-)
-h("Импорт старых TXT: сначала один файл")
-p(
-    "«Автомобили» → <b>«Импорт TXT»</b>. Проверьте кодировку, "
-    "машину, даты, текст, пробег и суммы; исправьте ошибки, "
-    "подтвердите нужные записи и импортируйте. Оригиналы "
-    "сохраняются. Распознавание вашего архива ещё нужно проверить; "
-    "не переносите весь архив без пробной проверки."
-)
-h("Если возникла проблема")
-p(
-    "Запишите действие, точный текст ошибки, версию в нижней "
-    "строке и режим: обычный или демонстрационный. Передайте описание "
-    "ошибки разработчику. На снимке экрана скройте данные реальных "
-    "клиентов. Если программа уже открыта, закройте прежнее окно "
-    "того же режима."
-)
-p(
-    (
-        "При блокировке запуска защитой Windows не отключайте защиту: "
-        "сообщите о предупреждении. Эта сборка проверена на компьютере "
-        "разработки; запуск на другом компьютере нужно проверить "
-        "отдельно."
-    ),
-    "small",
-)
-
-doc = BaseDocTemplate(
-    str(PDF),
-    pagesize=(WIDTH, HEIGHT),
-    title="AutoService 0.5.1 - Руководство пользователя",
-    author="AutoService",
-    leftMargin=18 * mm,
-    rightMargin=18 * mm,
-    topMargin=17 * mm,
-    bottomMargin=24 * mm,
-)
-frame = Frame(
-    doc.leftMargin,
-    doc.bottomMargin,
-    doc.width,
-    doc.height,
-    leftPadding=0,
-    rightPadding=0,
-    topPadding=0,
-    bottomPadding=0,
-)
-doc.addPageTemplates(PageTemplate(id="guide", frames=[frame], onPage=footer))
-doc.build(story)
-print(PDF)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, required=True, help="Каталог готовой PDF-инструкции")
+    print(build_guide(parser.parse_args().output))
