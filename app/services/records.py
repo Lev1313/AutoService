@@ -120,13 +120,21 @@ class Records:
                 dict(row) for row in connection.execute("SELECT DISTINCT make,model FROM vehicles")
             ]
 
-    def vehicles(self, query: str = "", archived: bool = False):
+    def vehicles(
+        self, query: str = "", archived: bool = False, *, current_repairs_only: bool = False
+    ):
         with connect(self.path) as connection:
             rows = connection.execute(
                 """SELECT v.*, c.name AS contact_name, c.phone
                 FROM vehicles v LEFT JOIN contacts c ON c.id = v.contact_id
-                WHERE v.archived = ? ORDER BY v.make COLLATE NOCASE, v.model, v.id""",
-                (int(archived),),
+                WHERE v.archived = ? AND (
+                    NOT ? OR EXISTS (
+                        SELECT 1 FROM repairs r WHERE r.vehicle_id = v.id
+                        AND r.deleted_at IS NULL AND r.state_known = 1 AND r.completed = 0
+                    )
+                )
+                ORDER BY v.make COLLATE NOCASE, v.model, v.id""",
+                (int(archived), int(current_repairs_only)),
             ).fetchall()
         fields = ("make", "model", "plate", "vin", "contact_name", "phone")
         return [

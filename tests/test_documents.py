@@ -87,12 +87,16 @@ def test_render_failure_rolls_back_document_and_number(data, monkeypatch):
     import app.services.receipt_pdf as renderer
 
     original = renderer.pdf_bytes
+    draft = {"kind": "simple", "description": "Сохранённый черновик", "items": []}
+    service.save_draft(repair, draft)
     monkeypatch.setattr(renderer, "pdf_bytes", lambda *_: (_ for _ in ()).throw(OSError("Диск")))
     with pytest.raises(OSError):
-        service.create(repair)
+        service.create(repair, **draft, consume_draft=True)
     assert service.history(repair) == []
+    assert service.draft(repair) == draft
     monkeypatch.setattr(renderer, "pdf_bytes", original)
-    assert service.create(repair)["number"] == "КВ-000001"
+    assert service.create(repair, **draft, consume_draft=True)["number"] == "КВ-000001"
+    assert service.draft(repair) is None
 
 
 def test_pdf_integrity_and_backup_restore_include_original_bytes(data):
@@ -178,6 +182,7 @@ def test_preview_does_not_reserve_number_and_incomplete_draft_survives(data):
     service.save_draft(repair, draft)
     assert Documents(service.path).draft(repair) == draft
     assert service.create(repair)["number"] == "КВ-000001"
+    assert service.draft(repair) == draft
 
 
 def test_pdf_cyrillic_unknown_vs_zero_and_atomic_export(application, data, tmp_path):
@@ -272,44 +277,118 @@ document.close()
 def test_document_dialog_preview_save_history_and_stale_preview_guard(
     application, data, monkeypatch
 ):
-    records, service, _, repair = data
+    records, service, car, repair = data
     warnings = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args[2]))
     dialog = DocumentDialog(records, repair)
     dialog.show()
     application.processEvents()
-    QTest.mouseClick(dialog.preview_button, Qt.MouseButton.LeftButton)
     assert dialog.pdf.pageCount() == 1, warnings
     assert service.history(repair) == []
     assert not dialog.export_button.isEnabled()
-    assert not dialog.print_button.isEnabled()
-    assert "«Сохранить экземпляр», затем «Печать»" in dialog.message.text()
+    assert dialog.print_button.text() == "Оформить и печатать"
     dialog.description.setPlainText("Изменённый текст документа")
     assert dialog.content is None
+    QTest.qWait(dialog.preview_timer.interval() + 100)
+    assert "Изменённый текст документа" in dialog.pdf.getAllText(0).text()
+    dialog.draft_button.click()
+    assert service.draft(repair)["description"] == "Изменённый текст документа"
     QTest.mouseClick(dialog.create_button, Qt.MouseButton.LeftButton)
     assert len(service.history(repair)) == 1, warnings
+    assert service.draft(repair) is None
     assert dialog.export_button.isEnabled()
-    assert dialog.print_button.isEnabled()
+    assert dialog.print_button.text() == "Печать"
     assert not dialog.create_button.isEnabled()
     dialog.reject()
+    corrected = "Уточнённое описание ремонта"
+    records.save_repair(car, records.repairs(car)[0] | {"description": corrected}, repair)
+
     reopened = DocumentDialog(records, repair)
-    reopened.history.setCurrentIndex(1)
-    assert reopened.current_document["payload"]["description"] == "Изменённый текст документа"
+    document = reopened.current_document
+    assert document["payload"]["description"] == "Изменённый текст документа"
     assert reopened.pdf.pageCount() == 1
+    reopened.new_button.click()
+    assert reopened.current_document is None
+    assert reopened.description.toPlainText() == corrected
+    assert corrected in reopened.pdf.getAllText(0).text()
+    reopened.description.setPlainText("Редактирование второго черновика")
+    monkeypatch.setattr(QMessageBox, "question", lambda *_: QMessageBox.StandardButton.Cancel)
+    reopened.history.setCurrentIndex(reopened.history.findData(document["id"]))
+    assert reopened.history.currentIndex() == -1
+    assert reopened.description.toPlainText() == "Редактирование второго черновика"
+    reopened.draft_button.click()
+    assert "Черновик сохранён" in reopened.message.text()
+    reopened.history.setCurrentIndex(reopened.history.findData(document["id"]))
+    assert reopened.current_document["id"] == document["id"]
+    assert len(service.history(repair)) == 1
     reopened.reject()
+
+    with_draft = DocumentDialog(records, repair)
+    assert with_draft.current_document["id"] == document["id"]
+    with_draft.new_button.click()
+    assert with_draft.description.toPlainText() == "Редактирование второго черновика"
+    with_draft.reject()
+
+
+def test_issue_and_print_cancel_keeps_number(application, data, monkeypatch):
+    from PySide6.QtWidgets import QDialog
+
+    import app.ui.documents as documents_ui
+
+    records, service, _, repair = data
+    opened = []
+    warnings = []
+
+    class Printer:
+        PrinterMode = documents_ui.QPrinter.PrinterMode
+
+        def __init__(self, mode):
+            assert mode == self.PrinterMode.HighResolution
+
+        def setPageSize(self, size):
+            pass
+
+        def setResolution(self, resolution):
+            assert resolution == 300
+
+    class CancelPrintDialog:
+        def __init__(self, printer, parent):
+            opened.append(parent.current_document["number"])
+
+        def setMinMax(self, first, last):
+            assert (first, last) == (1, 1)
+
+        def exec(self):
+            return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args[2]))
+    monkeypatch.setattr(documents_ui.QPrinterInfo, "availablePrinterNames", lambda: ["Тест"])
+    monkeypatch.setattr(documents_ui, "QPrinter", Printer)
+    monkeypatch.setattr(documents_ui, "QPrintDialog", CancelPrintDialog)
+    dialog = DocumentDialog(records, repair)
+    assert service.history(repair) == []
+    dialog.print_button.click()
+    assert not warnings
+    assert opened == ["КВ-000001"]
+    assert "Квитанция КВ-000001 сохранена" in dialog.message.text()
+    assert dialog.export_button.isEnabled()
+    dialog.print_button.click()
+    assert opened == ["КВ-000001", "КВ-000001"]
+    assert len(service.history(repair)) == 1
+    dialog.reject()
 
 
 def test_print_without_available_printers(application, data, monkeypatch):
     from app.ui.documents import QPrinterInfo
 
-    records, _, _, repair = data
+    records, service, _, repair = data
     warnings = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args[2]))
     monkeypatch.setattr(QPrinterInfo, "availablePrinterNames", lambda: [])
     dialog = DocumentDialog(records, repair)
-    dialog.create()
+    dialog.print_button.click()
     assert dialog.print_button.isEnabled(), warnings
-    dialog.print_document()
+    assert len(service.history(repair)) == 1
     assert len(warnings) == 1
     assert "Диспетчер печати" in warnings[0]
     assert "Сохранить PDF" in warnings[0]

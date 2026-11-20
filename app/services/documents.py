@@ -108,6 +108,8 @@ class Documents:
         description=None,
         allow_difference=False,
         preview=False,
+        *,
+        consume_draft=False,
     ):
         if kind not in ("simple", "detailed"):
             raise ValueError("Выберите формат квитанции.")
@@ -189,6 +191,8 @@ class Documents:
                 "INSERT INTO document_files(document_id,content,sha256) VALUES (?,?,?)",
                 (document_id, content, sha256(content).hexdigest()),
             )
+            if consume_draft:
+                connection.execute("DELETE FROM document_drafts WHERE repair_id=?", (repair_id,))
         return self.get(document_id)
 
     def pdf_content(self, document_id):

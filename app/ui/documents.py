@@ -3,7 +3,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QBuffer, QIODevice, QRectF, QSize, Qt
+from PySide6.QtCore import QBuffer, QIODevice, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QPageSize, QPainter
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPdfWidgets import QPdfView
@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSplitter,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -118,17 +119,24 @@ class DocumentDialog(SafeDialog):
         self.service = Documents(records.path)
         self.records, self.repair_id = records, repair_id
         self.busy = True
-        self.previous_index = 0
+        self.previous_index = -1
         self.current_document = None
         self.content = None
-        self.confirmed_state = None
         self.setWindowTitle("Квитанция / Печать")
         self.resize(1180, 790)
         self.setMinimumSize(850, 580)
         layout = QVBoxLayout(self)
+        history_row = QHBoxLayout()
+        history_label = plain_label("Оформленные квитанции")
+        history_row.addWidget(history_label)
         self.history = QComboBox()
         self.history.currentIndexChanged.connect(self.switch_history)
-        layout.addWidget(self.history)
+        history_label.setBuddy(self.history)
+        history_row.addWidget(self.history, 1)
+        self.new_button = QPushButton("Новая квитанция")
+        self.new_button.clicked.connect(self.new_receipt)
+        history_row.addWidget(self.new_button)
+        layout.addLayout(history_row)
         split = QSplitter(Qt.Orientation.Horizontal)
         editor = QWidget()
         left = QVBoxLayout(editor)
@@ -164,14 +172,6 @@ class DocumentDialog(SafeDialog):
         left.addWidget(self.items_panel, 1)
         self.total = plain_label("")
         left.addWidget(self.total)
-        actions = QHBoxLayout()
-        self.preview_button = QPushButton("Предпросмотр")
-        self.preview_button.clicked.connect(self.preview)
-        actions.addWidget(self.preview_button)
-        self.create_button = QPushButton("Сохранить экземпляр")
-        self.create_button.clicked.connect(self.create)
-        actions.addWidget(self.create_button)
-        left.addLayout(actions)
         split.addWidget(editor)
         self.pdf = QPdfDocument(self)
         self.buffer = None
@@ -179,12 +179,16 @@ class DocumentDialog(SafeDialog):
         self.view.setDocument(self.pdf)
         self.view.setPageMode(QPdfView.PageMode.MultiPage)
         self.view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
-        split.addWidget(self.view)
+        self.preview_panel = QStackedWidget()
+        self.preview_note = plain_label("")
+        self.preview_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_note.setContentsMargins(18, 12, 18, 12)
+        self.preview_panel.addWidget(self.preview_note)
+        self.preview_panel.addWidget(self.view)
+        split.addWidget(self.preview_panel)
         split.setSizes([530, 650])
         layout.addWidget(split, 1)
-        self.message = plain_label(
-            "Предпросмотр не резервирует номер. Для выдачи сохраните экземпляр."
-        )
+        self.message = plain_label("")
         layout.addWidget(self.message)
         bottom = QHBoxLayout()
         settings = QPushButton("Реквизиты сервиса")
@@ -197,32 +201,46 @@ class DocumentDialog(SafeDialog):
         self.export_button = QPushButton("Сохранить PDF")
         self.export_button.clicked.connect(self.export)
         bottom.addWidget(self.export_button)
-        self.print_button = QPushButton("Печать")
-        self.print_button.clicked.connect(self.print_document)
+        self.create_button = QPushButton("Оформить без печати")
+        self.create_button.setAutoDefault(False)
+        self.create_button.clicked.connect(self.create)
+        bottom.addWidget(self.create_button)
+        self.print_button = QPushButton()
+        self.print_button.setAutoDefault(False)
+        self.print_button.setStyleSheet("font-weight: 600;")
+        self.print_button.clicked.connect(self.print_or_create)
         bottom.addWidget(self.print_button)
         close = QPushButton("Закрыть")
         close.clicked.connect(self.reject)
         bottom.addWidget(close)
         layout.addLayout(bottom)
+        self.preview_timer = QTimer(self)
+        self.preview_timer.setInterval(300)
+        self.preview_timer.setSingleShot(True)
+        self.preview_timer.timeout.connect(self.preview)
+        self.finished.connect(self.preview_timer.stop)
         self.load_history()
-        self.load_selection(0)
-        self.busy = False
+        self.load_selection(self.history.currentIndex())
         self.prepare_guard()
 
     def load_history(self, selected=None):
+        self.deleted_repair = bool(self.source_repair()["deleted_at"])
+        documents = self.service.history(self.repair_id)
         self.history.blockSignals(True)
         self.history.clear()
-        self.deleted_repair = bool(self.source_repair()["deleted_at"])
-        if not self.deleted_repair:
-            self.history.addItem("Новый документ / черновик", None)
-        for document in self.service.history(self.repair_id):
+        for document in documents:
             kind = "Простая" if document["kind"] == "simple" else "Подробная"
             stamp = datetime.fromisoformat(document["created_at"]).strftime("%d.%m.%Y %H:%M")
             self.history.addItem(f"{document['number']} · {stamp} · {kind}", document["id"])
-        index = max(0, self.history.findData(selected)) if selected else 0
+        self.history.setPlaceholderText("Выберите квитанцию" if documents else "Квитанций пока нет")
+        self.history.setEnabled(bool(documents))
+        index = self.history.findData(selected) if selected else 0 if documents else -1
         self.history.setCurrentIndex(index)
         self.history.blockSignals(False)
         self.previous_index = index
+
+    def new_receipt(self):
+        self.history.setCurrentIndex(-1)
 
     def switch_history(self, index):
         if self.busy:
@@ -254,14 +272,35 @@ class DocumentDialog(SafeDialog):
             self.apply_selection(index)
         except (*ERRORS, RuntimeError) as error:
             self.busy = False
-            self.clear_preview()
+            self.clear_preview("Квитанцию не удалось открыть.")
             self.original = self.state()
             QMessageBox.warning(self, "Не удалось открыть документ", str(error))
 
     def apply_selection(self, index):
         self.busy = True
+        self.preview_timer.stop()
+        self.previous_index = index
         document_id = self.history.itemData(index)
-        self.current_document = self.service.get(document_id) if document_id else None
+        saved = document_id is not None
+        editable = not saved and not self.deleted_repair
+        self.current_document = None
+        self.clear_preview()
+        self.new_button.setEnabled(saved and not self.deleted_repair)
+        for widget in (self.kind, self.description, self.items_panel):
+            widget.setEnabled(editable)
+        for button in (self.draft_button, self.create_button):
+            button.setVisible(editable)
+            button.setEnabled(editable)
+        self.export_button.setVisible(saved)
+        self.print_button.setVisible(editable or saved)
+        self.print_button.setEnabled(editable)
+        self.print_button.setText("Печать" if saved else "Оформить и печатать")
+        self.print_button.setToolTip(
+            "Проверьте квитанцию здесь. В окне Windows выберите принтер."
+            if saved
+            else "Сохранить квитанцию с номером и открыть окно печати Windows."
+        )
+        self.current_document = self.service.get(document_id) if saved else None
         if self.current_document:
             payload = self.current_document["payload"]
             values = {
@@ -290,32 +329,25 @@ class DocumentDialog(SafeDialog):
         self.items.setRowCount(0)
         for row in values["items"]:
             self.add_item(values=row)
-        saved = self.current_document is not None
-        for widget in (
-            self.kind,
-            self.description,
-            self.items_panel,
-            self.preview_button,
-            self.create_button,
-            self.draft_button,
-        ):
-            widget.setEnabled(not saved and not self.deleted_repair)
         self.items_panel.setVisible(values["kind"] == "detailed")
-        self.previous_index = index
         self.original = self.state()
         self.busy = False
         self.update_total()
         if saved:
             self.load_pdf(self.service.pdf_content(self.current_document["id"]))
             self.message.setText(
-                "Сохранённый экземпляр. Изменения ремонта и реквизитов его не меняют."
+                f"Квитанция {self.current_document['number']} оформлена и сохранена. "
+                "Предпросмотр показан здесь. В окне Windows выберите принтер."
             )
+        elif editable:
+            self.message.setText("Черновик. Квитанция получит номер при оформлении.")
+            self.preview()
         else:
-            self.clear_preview()
-            if self.deleted_repair:
-                self.message.setText(
-                    "Ремонт удалён. Выданных квитанций нет; для новой восстановите ремонт."
-                )
+            self.clear_preview(
+                "Для этого ремонта ещё нет оформленных квитанций. "
+                "Чтобы создать квитанцию, восстановите ремонт."
+            )
+            self.message.clear()
 
     def source_repair(self):
         from app.database.connection import connect
@@ -386,18 +418,17 @@ class DocumentDialog(SafeDialog):
         if self.busy:
             return
         self.items_panel.setVisible(self.kind.currentData() == "detailed")
-        self.clear_preview()
+        self.clear_preview("Обновляем предпросмотр…")
+        self.message.setText("Черновик. Квитанция получит номер при оформлении.")
         self.update_total()
+        self.preview_timer.start()
 
-    def clear_preview(self):
+    def clear_preview(self, text="Загружаем предпросмотр…"):
         self.pdf.close()
         self.content = None
         self.export_button.setEnabled(False)
-        self.print_button.setEnabled(False)
-        self.message.setText(
-            "Для печати нажмите «Сохранить экземпляр», затем «Печать». "
-            "Проверить квитанцию перед сохранением можно через «Предпросмотр»."
-        )
+        self.preview_note.setText(text)
+        self.preview_panel.setCurrentWidget(self.preview_note)
 
     def load_pdf(self, content):
         self.pdf.close()
@@ -414,20 +445,25 @@ class DocumentDialog(SafeDialog):
         # Выдача/печать только сохранённого экземпляра с постоянным номером.
         saved = self.current_document is not None
         self.export_button.setEnabled(saved)
-        self.print_button.setEnabled(saved)
+        self.print_button.setEnabled(True)
+        self.preview_panel.setCurrentWidget(self.view)
 
-    def build(self, persist):
+    def preview(self):
+        try:
+            draft = self.service.create(
+                self.repair_id, **self.state(), allow_difference=True, preview=True
+            )
+            self.load_pdf(pdf_bytes(draft))
+        except (*ERRORS, RuntimeError) as error:
+            self.clear_preview(f"Предпросмотр недоступен.\n{error}")
+
+    def create(self):
+        if self.current_document or self.deleted_repair:
+            return False
         value = self.state()
         try:
             try:
-                result = self.service.create(
-                    self.repair_id,
-                    value["kind"],
-                    value["items"],
-                    value["description"],
-                    allow_difference=self.confirmed_state == value,
-                    preview=not persist,
-                )
+                result = self.service.create(self.repair_id, **value, consume_draft=True)
             except TotalMismatch as error:
                 if (
                     QMessageBox.question(
@@ -439,34 +475,27 @@ class DocumentDialog(SafeDialog):
                     )
                     != QMessageBox.StandardButton.Yes
                 ):
-                    return
-                self.confirmed_state = value
+                    return False
                 result = self.service.create(
-                    self.repair_id,
-                    value["kind"],
-                    value["items"],
-                    value["description"],
-                    allow_difference=True,
-                    preview=not persist,
-                )
-            content = self.service.pdf_content(result["id"]) if persist else pdf_bytes(result)
-            if persist:
-                self.service.save_draft(self.repair_id, value)
-                self.load_history(result["id"])
-                self.load_selection(self.history.currentIndex())
-            else:
-                self.load_pdf(content)
-                self.message.setText(
-                    "Чтобы напечатать квитанцию, нажмите «Сохранить экземпляр», затем «Печать»."
+                    self.repair_id, **value, allow_difference=True, consume_draft=True
                 )
         except (*ERRORS, RuntimeError) as error:
-            QMessageBox.warning(self, "Не удалось подготовить документ", str(error))
+            QMessageBox.warning(self, "Не удалось оформить квитанцию", str(error))
+            return False
+        self.current_document = result
+        self.preview_timer.stop()
+        self.create_button.setEnabled(False)
+        self.clear_preview()
+        try:
+            self.load_history(result["id"])
+            self.load_selection(self.history.currentIndex())
+        except (*ERRORS, RuntimeError) as error:
+            QMessageBox.warning(self, f"Квитанция {result['number']} оформлена", str(error))
+        return self.content is not None
 
-    def preview(self):
-        self.build(False)
-
-    def create(self):
-        self.build(True)
+    def print_or_create(self):
+        if self.current_document or self.create():
+            self.print_document()
 
     def save(self, checked=False, *, close=True):
         try:
@@ -478,11 +507,18 @@ class DocumentDialog(SafeDialog):
             return False
         if close:
             self.accept()
+        elif not self.current_document:
+            self.message.setText("Черновик сохранён. Квитанция получит номер при оформлении.")
         return True
 
     def settings(self):
-        if DocumentSettingsDialog(self.service, self).exec() and not self.current_document:
-            self.clear_preview()
+        if (
+            DocumentSettingsDialog(self.service, self).exec()
+            and not self.current_document
+            and not self.deleted_repair
+        ):
+            self.preview_timer.stop()
+            self.preview()
 
     def export(self):
         if not self.content or not self.current_document:
@@ -553,3 +589,8 @@ class DocumentDialog(SafeDialog):
                 self.message.setText(
                     "Задание отправлено на печать. Если лист не вышел, проверьте очередь в Windows."
                 )
+
+        else:
+            self.message.setText(
+                f"Печать отменена. Квитанция {self.current_document['number']} сохранена."
+            )

@@ -261,6 +261,7 @@ def reopen(root, report):
             check(window.pages.currentIndex() == index, "Переключение раздела")
         check(window.navigation.count() == 4, "Рабочие разделы без Финансов")
         window.navigation.setCurrentRow(window.pages.indexOf(window.calls_page))
+        window.calls_page.filter.setCurrentIndex(window.calls_page.filter.findData("all"))
         window.calls_page.view_mode.setCurrentIndex(1)
         window.calls_page.calendar.setSelectedDate(QDate(2026, 12, 1))
         check(window.calls_page.rows[0]["manual_date"] == "2026-12-01", "Одна задача в календаре")

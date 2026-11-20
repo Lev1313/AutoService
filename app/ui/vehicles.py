@@ -2,7 +2,7 @@
 
 import sqlite3
 
-from PySide6.QtCore import QDate, QModelIndex, QStringListModel, Qt
+from PySide6.QtCore import QDate, QModelIndex, QStringListModel, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -258,6 +258,8 @@ class VehicleDialog(SafeDialog):
 
 
 class RepairDialog(SafeDialog):
+    repair_saved = Signal(int)
+
     def __init__(self, records: Records, vehicle_id: int, repair=None, parent=None):
         super().__init__(parent)
         self.records = records
@@ -314,11 +316,14 @@ class RepairDialog(SafeDialog):
         self.description = QPlainTextEdit(self.repair.get("description", ""))
         self.description.setAccessibleName("Описание ремонта")
         layout.addWidget(self.description, 1)
+        self.save_notice = plain_label("")
+        self.save_notice.hide()
+        layout.addWidget(self.save_notice)
         layout.addWidget(plain_label("Завершение ремонта не означает получение оплаты."))
         row = QHBoxLayout()
-        cancel = QPushButton("Отмена")
-        cancel.clicked.connect(self.reject)
-        row.addWidget(cancel)
+        self.cancel_button = QPushButton("Отмена")
+        self.cancel_button.clicked.connect(self.reject)
+        row.addWidget(self.cancel_button)
         self.document_button = QPushButton("Документ / Печать")
         self.document_button.clicked.connect(self.open_documents)
         row.addWidget(self.document_button)
@@ -329,9 +334,10 @@ class RepairDialog(SafeDialog):
         row.addStretch()
         self.save_button = QPushButton("Сохранить")
         self.save_button.clicked.connect(self.save)
+        self.save_button.setDefault(True)
         row.addWidget(self.save_button)
         self.finish_button = QPushButton("Завершить ремонт")
-        self.finish_button.setDefault(True)
+        self.finish_button.setAutoDefault(False)
         self.finish_button.clicked.connect(lambda: self.save(completed=True))
         row.addWidget(self.finish_button)
         self.finish_button.setVisible(not self.repair.get("completed", False))
@@ -447,8 +453,13 @@ class RepairDialog(SafeDialog):
         self.mileage_verified.setChecked(bool(self.repair["verified"]))
         self.original = self.state()
         self.finish_button.setVisible(not self.repair["completed"])
+        self.repair_saved.emit(repair_id)
         if close:
             self.accept()
+        else:
+            self.save_notice.setText("Ремонт сохранён.")
+            self.save_notice.show()
+            self.cancel_button.setText("Закрыть")
         return True
 
     def open_documents(self):
@@ -511,8 +522,11 @@ class VehicleCard(QDialog):
         self.history.cellDoubleClicked.connect(lambda *_: self.open_repair())
         self.history.itemSelectionChanged.connect(self.show_description)
         self.show_deleted = QCheckBox("Показать удалённые ремонты")
-        self.show_deleted.toggled.connect(self.refresh)
+        self.show_deleted.toggled.connect(lambda _: self.refresh())
         layout.addWidget(self.show_deleted)
+        self.save_notice = plain_label("")
+        self.save_notice.hide()
+        layout.addWidget(self.save_notice)
         layout.addWidget(self.history, 1)
         self.preview = QPlainTextEdit()
         self.preview.setReadOnly(True)
@@ -522,9 +536,9 @@ class VehicleCard(QDialog):
         self.open_button = QPushButton("Открыть выбранный ремонт")
         self.open_button.clicked.connect(self.open_repair)
         bottom.addWidget(self.open_button)
-        document_button = QPushButton("Документы / Печать")
-        document_button.clicked.connect(self.open_documents)
-        bottom.addWidget(document_button)
+        self.document_button = QPushButton("Документы / Печать")
+        self.document_button.clicked.connect(self.open_documents)
+        bottom.addWidget(self.document_button)
         self.delete_button = QPushButton("Удалить ремонт")
         self.delete_button.clicked.connect(self.toggle_deleted)
         bottom.addWidget(self.delete_button)
@@ -536,9 +550,14 @@ class VehicleCard(QDialog):
         close.clicked.connect(self.accept)
         bottom.addWidget(close)
         layout.addLayout(bottom)
+        self.rows = []
         self.refresh()
 
-    def refresh(self):
+    def refresh(self, repair_id=None):
+        saved = repair_id is not None
+        previous = self.history.currentRow()
+        if repair_id is None and 0 <= previous < len(self.rows):
+            repair_id = self.rows[previous]["id"]
         vehicle = self.records.vehicle(self.vehicle_id)
         name = " ".join(filter(None, (vehicle["make"], vehicle["model"]))) or "Автомобиль"
         self.heading.setText(f"{name} · {vehicle['plate'] or 'без госномера'}")
@@ -581,16 +600,19 @@ class VehicleCard(QDialog):
             )
             for column, value in enumerate(values):
                 self.history.setItem(index, column, QTableWidgetItem(value))
-        self.open_button.setEnabled(bool(self.rows))
-        self.delete_button.setEnabled(bool(self.rows))
         if self.rows:
-            self.history.selectRow(0)
-            self.show_description()
+            self.history.selectRow(
+                next((i for i, row in enumerate(self.rows) if row["id"] == repair_id), 0)
+            )
+        self.show_description()
+        self.save_notice.setText("Ремонт сохранён." if saved else "")
+        self.save_notice.setVisible(saved)
 
     def show_description(self):
         row = self.history.currentRow()
         selected = self.rows[row] if 0 <= row < len(self.rows) else None
         self.open_button.setEnabled(bool(selected) and not selected["deleted_at"])
+        self.document_button.setEnabled(bool(selected))
         self.delete_button.setEnabled(bool(selected))
         self.source_button.setVisible(bool(selected) and selected["origin"] == "txt")
         self.delete_button.setText(
@@ -682,18 +704,18 @@ class VehicleCard(QDialog):
         PlansDialog(self.records, self.vehicle_id, self).exec()
         self.refresh()
 
+    def edit_repair(self, repair=None):
+        dialog = RepairDialog(self.records, self.vehicle_id, repair, self)
+        dialog.repair_saved.connect(self.refresh)
+        dialog.exec()
+
     def add_repair(self):
-        if RepairDialog(self.records, self.vehicle_id, parent=self).exec():
-            self.refresh()
+        self.edit_repair()
 
     def open_repair(self):
         row = self.history.currentRow()
-        if (
-            0 <= row < len(self.rows)
-            and not self.rows[row]["deleted_at"]
-            and RepairDialog(self.records, self.vehicle_id, self.rows[row], self).exec()
-        ):
-            self.refresh()
+        if 0 <= row < len(self.rows) and not self.rows[row]["deleted_at"]:
+            self.edit_repair(self.rows[row])
 
     def open_documents(self):
         from app.ui.documents import DocumentDialog
@@ -726,6 +748,9 @@ class VehiclesPage(QWidget):
         import_button.clicked.connect(self.import_txt)
         row.addWidget(import_button)
         layout.addLayout(row)
+        self.current_only = QCheckBox("Только автомобили с текущим ремонтом")
+        self.current_only.toggled.connect(self.refresh)
+        layout.addWidget(self.current_only)
         self.table = make_table(("Автомобиль", "Госномер", "Контакт", "Телефон"))
         self.table.setAccessibleName("Автомобили")
         self.table.cellDoubleClicked.connect(lambda *_: self.open_vehicle())
@@ -746,7 +771,9 @@ class VehiclesPage(QWidget):
             self.rows[previous]["id"] if 0 <= previous < len(getattr(self, "rows", [])) else None
         )
         try:
-            self.rows = self.records.vehicles(self.search.text())
+            self.rows = self.records.vehicles(
+                self.search.text(), current_repairs_only=self.current_only.isChecked()
+            )
         except ERRORS as error:
             QMessageBox.warning(self, "Не удалось открыть список", str(error))
             return
@@ -764,7 +791,9 @@ class VehiclesPage(QWidget):
             f"Найдено: {len(self.rows)}"
             if self.rows
             else (
-                "Ничего не найдено. Измените поиск или добавьте автомобиль."
+                "Автомобили с текущими ремонтами не найдены. Измените поиск или отключите фильтр."
+                if self.current_only.isChecked()
+                else "Ничего не найдено. Измените поиск или добавьте автомобиль."
                 if self.search.text().strip()
                 else "Начните с «Добавить автомобиль». Затем откройте карточку и добавьте ремонт."
             )

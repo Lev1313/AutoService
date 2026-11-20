@@ -422,8 +422,6 @@ class CallsPage(QWidget):
         calendar = self.view_mode.currentData() == "calendar"
         self.calendar.setVisible(calendar)
         self.calendar_note.setVisible(calendar)
-        # Calendar initially shows all open calls on the selected day.
-        self.filter.setCurrentIndex(self.filter.findData("all"))
         self.refresh()
 
     def show_unknown(self):
@@ -448,9 +446,11 @@ class CallsPage(QWidget):
                     "handled": task["status"] != "open" or not task["enabled"],
                 }[key]
 
-            self.unknown_button.setText(
-                f"Уточнить срок ({sum(task['due_date'] is None for task in rows)})"
+            unknown = sum(
+                task["due_date"] is None and task["status"] == "open" and task["enabled"]
+                for task in rows
             )
+            self.unknown_button.setText(f"Уточнить срок ({unknown})")
             filtered = [task for task in rows if matches(task)]
             if self.view_mode.currentData() == "calendar":
                 for value in self.marked_dates:
@@ -466,12 +466,15 @@ class CallsPage(QWidget):
                         QDate.fromString(value, "yyyy-MM-dd"), highlight
                     )
                 selected = self.calendar.selectedDate().toString("yyyy-MM-dd")
-                self.rows = [task for task in filtered if task["due_date"] == selected]
-                unknown = sum(task["due_date"] is None for task in filtered)
-                self.calendar_note.setText(
-                    f"{formatted_date(selected)} · звонков: {len(self.rows)}. "
-                    f"Без даты: {unknown} — кнопка «Уточнить срок». Дни со звонками выделены."
-                )
+                if key == "unknown":
+                    self.rows = filtered
+                    self.calendar_note.setText(f"Звонки без даты: {len(self.rows)}.")
+                else:
+                    self.rows = [task for task in filtered if task["due_date"] == selected]
+                    self.calendar_note.setText(
+                        f"{formatted_date(selected)} · звонков: {len(self.rows)}. "
+                        "Дни со звонками выделены."
+                    )
             else:
                 self.rows = filtered
             self.empty.setText(

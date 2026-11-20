@@ -3,7 +3,7 @@
 import sqlite3
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QDateTime, QSettings, Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -28,6 +28,7 @@ from app.ui.vehicles import VehiclesPage
 from app.version import VERSION
 
 SECTIONS = ("Автомобили", "Клиенты", "Звонки", "Настройки")
+LAST_BACKUP_KEY = "last_manual_backup"
 
 STYLESHEET = """
 QWidget { color: #243247; font-family: 'Segoe UI'; font-size: 10pt; }
@@ -93,6 +94,9 @@ class MainWindow(QMainWindow):
 
         self.pages = QStackedWidget()
         self.db_path = db_path
+        self.backup_preferences = QSettings(
+            str(db_path.with_suffix(".ini")), QSettings.Format.IniFormat, self
+        )
         self.records = Records(db_path)
         self.vehicles_page = VehiclesPage(self.records)
         self.customers_page = CustomersPage(self.records)
@@ -110,7 +114,7 @@ class MainWindow(QMainWindow):
             page = QWidget()
             content = QVBoxLayout(page)
             content.setContentsMargins(32, 30, 32, 24)
-            content.setSpacing(18)
+            content.setSpacing(12)
             content.addWidget(label(name, "title"))
             if name == "Настройки":
                 content.addWidget(label("Хранение данных", "badge"))
@@ -119,18 +123,30 @@ class MainWindow(QMainWindow):
                 content.addWidget(path_label)
                 content.addWidget(
                     label(
-                        "Создайте резервную копию на другом диске или флешке. "
-                        "Перед восстановлением программа сохранит текущую базу отдельно.",
+                        "Для восстановления нужна резервная копия .sqlite3. Храните её на другом "
+                        "диске или флешке. Перед восстановлением программа сохранит текущую базу "
+                        "отдельно.",
                         "muted",
                         True,
                     )
                 )
+                self.backup_status = label("", "muted", True)
+                self.show_backup_date(
+                    QDateTime.fromString(
+                        self.backup_preferences.value(LAST_BACKUP_KEY, "", type=str),
+                        Qt.DateFormat.ISODate,
+                    )
+                )
+                content.addWidget(self.backup_status)
                 backup_button = QPushButton("Создать резервную копию")
                 backup_button.clicked.connect(self.create_backup)
                 content.addWidget(backup_button)
                 restore_button = QPushButton("Восстановить из копии")
                 restore_button.clicked.connect(self.restore_backup)
                 content.addWidget(restore_button)
+                content.addWidget(
+                    label("TXT и Excel — выгрузки для просмотра и работы с данными.", "muted", True)
+                )
                 export_button = QPushButton("Экспорт базы в TXT / Excel")
                 export_button.clicked.connect(self.export_data)
                 content.addWidget(export_button)
@@ -186,21 +202,42 @@ class MainWindow(QMainWindow):
 
         ExportDialog(self.records, self).exec()
 
+    def show_backup_date(self, completed_at: QDateTime):
+        if completed_at.isValid():
+            formatted = completed_at.toLocalTime().toString("dd.MM.yyyy 'в' HH:mm")
+            self.backup_status.setText(f"Последняя ручная копия создана {formatted}.")
+        else:
+            self.backup_status.setText("Дата последней ручной копии пока неизвестна.")
+
     def create_backup(self):
+        stamp = QDateTime.currentDateTime().toString("yyyy-MM-dd-HHmmss")
         filename, _ = QFileDialog.getSaveFileName(
             self,
             "Сохранить резервную копию",
-            "AutoService-copy.sqlite3",
+            f"AutoService-copy-{stamp}.sqlite3",
             "База AutoService (*.sqlite3)",
         )
         if not filename:
             return
         try:
-            backup_database(self.db_path, Path(filename))
+            destination = backup_database(self.db_path, Path(filename))
         except (OSError, ValueError, RuntimeError, sqlite3.Error) as error:
             QMessageBox.warning(self, "Не удалось создать копию", str(error))
             return
-        QMessageBox.information(self, "Резервная копия готова", filename)
+        completed_at = QDateTime.currentDateTimeUtc()
+        self.show_backup_date(completed_at)
+        self.backup_preferences.setValue(
+            LAST_BACKUP_KEY, completed_at.toString(Qt.DateFormat.ISODate)
+        )
+        self.backup_preferences.sync()
+        if self.backup_preferences.status() != QSettings.Status.NoError:
+            QMessageBox.warning(
+                self,
+                "Резервная копия готова",
+                f"{destination}\n\nНе удалось запомнить дату копии для следующего запуска.",
+            )
+            return
+        QMessageBox.information(self, "Резервная копия готова", str(destination))
 
     def restore_backup(self):
         filename, _ = QFileDialog.getOpenFileName(

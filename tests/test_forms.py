@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QDialog, QMessageBox
 
@@ -124,3 +124,98 @@ def test_ctrl_f_and_ctrl_s(application, records):
     assert editor.result() == QDialog.DialogCode.Accepted
     assert records.repairs(car)[0]["description"] == "Сохранено клавиатурой"
     window.close()
+
+
+def test_enter_saves_repair_without_completing_it(application, records):
+    car = records.save_vehicle({"plate": "ТЕСТ"})
+    editor = RepairDialog(records, car)
+    editor.show()
+    editor.amount.setFocus()
+    editor.amount.setText("1500")
+    application.processEvents()
+
+    QTest.keyClick(editor.amount, Qt.Key.Key_Return)
+
+    assert editor.result() == QDialog.DialogCode.Accepted
+    repair = records.repairs(car)[0]
+    assert repair["amount_kopecks"] == 150000
+    assert not repair["completed"]
+
+
+def test_repair_saved_for_document_appears_even_when_editor_is_closed(
+    application, records, monkeypatch
+):
+    from app.ui.documents import DocumentDialog
+
+    car = records.save_vehicle({"plate": "ТЕСТ"})
+    card = VehicleCard(records, car)
+    assert not card.document_button.isEnabled()
+    monkeypatch.setattr(QMessageBox, "question", lambda *_: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(DocumentDialog, "exec", lambda _: QDialog.DialogCode.Rejected)
+
+    def edit_then_close(editor):
+        editor.description.setPlainText("Диагностика")
+        editor.document_button.click()
+        assert card.history.rowCount() == 1
+        assert editor.save_notice.text() == "Ремонт сохранён."
+        editor.cancel_button.click()
+        return editor.result()
+
+    monkeypatch.setattr(RepairDialog, "exec", edit_then_close)
+    card.add_repair()
+
+    assert card.document_button.isEnabled()
+    assert card.save_notice.text() == "Ремонт сохранён."
+    assert card.preview.toPlainText() == "Диагностика"
+    assert len(records.repairs(car)) == 1
+    card.close()
+
+
+def test_edit_keeps_the_same_repair_selected_when_history_reorders(
+    application, records, monkeypatch
+):
+    car = records.save_vehicle({"plate": "ТЕСТ"})
+    edited = records.save_repair(car, {"visit_date": "2026-10-01", "description": "Старый"})
+    records.save_repair(car, {"visit_date": "2026-10-10", "description": "Другой"})
+    other = records.save_repair(car, {"visit_date": "2026-11-01", "description": "Новый"})
+    card = VehicleCard(records, car)
+    assert card.rows[card.history.currentRow()]["id"] == other
+    card.history.selectRow(2)
+
+    def edit_and_save(editor):
+        editor.visit_date.setDate(QDate(2026, 10, 15))
+        editor.description.setPlainText("Проверено")
+        editor.save_button.click()
+        return editor.result()
+
+    monkeypatch.setattr(RepairDialog, "exec", edit_and_save)
+    card.open_repair()
+    assert card.history.currentRow() == 1
+    assert card.rows[card.history.currentRow()]["id"] == edited
+    assert card.preview.toPlainText() == "Проверено"
+    card.close()
+
+
+def test_current_repair_filter_combines_with_search(application, records):
+    from app.ui.vehicles import VehiclesPage
+
+    current = records.save_vehicle({"make": "Ford", "plate": "ТЕСТ 001"})
+    complete = records.save_vehicle({"make": "Ford", "plate": "ТЕСТ 002"})
+    deleted = records.save_vehicle({"make": "Honda", "plate": "ТЕСТ 003"})
+    records.save_vehicle({"make": "Honda", "plate": "ТЕСТ 004"})
+    records.save_repair(current, {"visit_date": "2026-11-20"})
+    records.save_repair(complete, {"visit_date": "2026-11-20", "completed": True})
+    discarded = records.save_repair(deleted, {"visit_date": "2026-11-20"})
+    records.set_repair_deleted(deleted, discarded)
+    page = VehiclesPage(records)
+    assert page.table.rowCount() == 4
+
+    page.current_only.click()
+    assert [row["id"] for row in page.rows] == [current]
+    page.search.setText("Honda")
+    assert page.table.rowCount() == 0
+    assert "отключите фильтр" in page.empty.text()
+
+    page.current_only.click()
+    assert page.table.rowCount() == 2
+    page.close()

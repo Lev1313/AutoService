@@ -197,6 +197,11 @@ def test_calendar_same_tasks_manual_date_handled_and_unknown(application, tmp_pa
     ) == 0
     assert len(window.findChildren(CallsPage)) == 1
     page = window.calls_page
+    assert page.filter.currentData() == "due"
+    page.view_mode.setCurrentIndex(1)
+    assert page.filter.currentData() == "due"
+    page.view_mode.setCurrentIndex(0)
+    assert page.filter.currentData() == "due"
     page.filter.setCurrentIndex(page.filter.findData("all"))
     known = next(row for row in page.rows if row["due_date"])
     count = len(service.tasks(include_handled=True))
@@ -215,6 +220,14 @@ def test_calendar_same_tasks_manual_date_handled_and_unknown(application, tmp_pa
     page.show_unknown()
     assert page.rows[0]["title"] == "Нет срока"
     assert page.view_mode.currentData() == "list"
+    unknown = page.rows[0]["id"]
+    page.view_mode.setCurrentIndex(1)
+    assert page.filter.currentData() == "unknown"
+    assert [row["id"] for row in page.rows] == [unknown]
+    page.calendar.setSelectedDate(QDate(2026, 12, 1))
+    assert [row["id"] for row in page.rows] == [unknown]
+    page.view_mode.setCurrentIndex(0)
+    assert page.filter.currentData() == "unknown"
     assert len(service.tasks(include_handled=True)) == count
     window.close()
 
