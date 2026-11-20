@@ -114,6 +114,35 @@ class Records:
             rows += self.vehicles(archived=True)
         return [row for row in rows if row["contact_id"] == contact_id]
 
+    def assign_vehicle_contact(self, vehicle_id, contact_id, *, previous_contact_id):
+        with connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            vehicle = connection.execute(
+                "SELECT contact_id FROM vehicles WHERE id=? AND archived=0", (vehicle_id,)
+            ).fetchone()
+            if vehicle is None:
+                raise ValueError("Автомобиль не найден или находится в архиве.")
+            if vehicle["contact_id"] == contact_id:
+                return
+            if vehicle["contact_id"] != previous_contact_id:
+                raise ValueError("Клиент автомобиля изменился. Проверьте обновлённый список.")
+            if (
+                connection.execute("SELECT 1 FROM contacts WHERE id=?", (contact_id,)).fetchone()
+                is None
+            ):
+                raise ValueError("Клиент не найден.")
+            connection.execute(
+                "UPDATE vehicles SET contact_id=? WHERE id=?", (contact_id, vehicle_id)
+            )
+            self.record_vehicle_contact(connection, vehicle_id, contact_id)
+
+    @staticmethod
+    def record_vehicle_contact(connection, vehicle_id, contact_id):
+        connection.execute(
+            "INSERT INTO vehicle_contacts(vehicle_id, contact_id, changed_at) VALUES (?, ?, ?)",
+            (vehicle_id, contact_id, datetime.now().isoformat(timespec="seconds")),
+        )
+
     def vehicle_names(self):
         with connect(self.path) as connection:
             return [
@@ -218,11 +247,7 @@ class Records:
                     (*parameters, vehicle_id),
                 )
             if previous is None or previous["contact_id"] != contact_id:
-                connection.execute(
-                    """INSERT INTO vehicle_contacts(vehicle_id, contact_id, changed_at)
-                    VALUES (?, ?, ?)""",
-                    (vehicle_id, contact_id, datetime.now().isoformat(timespec="seconds")),
-                )
+                self.record_vehicle_contact(connection, vehicle_id, contact_id)
         return vehicle_id
 
     def repairs(self, vehicle_id: int, include_deleted=False):

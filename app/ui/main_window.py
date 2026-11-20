@@ -4,8 +4,10 @@ import sqlite3
 from pathlib import Path
 
 from PySide6.QtCore import QDateTime, QSettings, Qt
-from PySide6.QtGui import QColor, QKeySequence, QShortcut
+from PySide6.QtGui import QKeySequence, QPalette, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -14,6 +16,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QStackedWidget,
     QStyledItemDelegate,
     QStyleOptionViewItem,
@@ -27,47 +30,12 @@ from app.ui.appointments import AppointmentsPage
 from app.ui.customers import CustomersPage
 from app.ui.help import HelpDialog
 from app.ui.maintenance import CallsPage
-from app.ui.vehicles import VehiclesPage
+from app.ui.theme import THEME_KEY, apply_theme
+from app.ui.vehicles import VehiclesPage, primary_button
 from app.version import VERSION
 
 SECTIONS = ("Автомобили", "Клиенты", "Звонки", "Записи", "Настройки")
 LAST_BACKUP_KEY = "last_manual_backup"
-
-STYLESHEET = """
-QWidget { color: #243247; font-family: 'Segoe UI'; font-size: 10pt; }
-QMainWindow, QStackedWidget { background: #f5f7fa; }
-QFrame#sidebar { background: white; border-right: 1px solid #dce3ec; }
-QLabel#brand { font-size: 16pt; font-weight: 700; color: #175cd3; }
-QLabel#title { font-size: 23pt; font-weight: 600; }
-QLabel#repairTitle { font-size: 17pt; font-weight: 600; }
-QLabel#muted { color: #596980; }
-QLabel#badge { color: #175cd3; background: #eaf2ff; padding: 8px; border-radius: 6px; }
-QListWidget { background: transparent; border: none; outline: none; }
-QListWidget::item { padding: 12px 10px; margin: 3px 0; border-radius: 6px; }
-QListWidget::item:selected { background: #eaf2ff; color: #175cd3; font-weight: 600; }
-QListWidget::item:hover:!selected { background: #f0f3f7; }
-QListWidget::item:focus { border: 1px solid #175cd3; }
-QPushButton[primary="true"] {
-    background: #175cd3; color: white; border: 1px solid #175cd3; border-radius: 4px;
-    padding: 4px 10px; font-weight: 600;
-}
-QPushButton[primary="true"]:hover { background: #104eBA; }
-QPushButton[primary="true"]:pressed { background: #0d429f; }
-QPushButton[primary="true"]:focus { border-color: #102950; text-decoration: underline; }
-QPushButton[primary="true"]:disabled { color: #596980; background: #e6ebf2; border-color: #dce3ec; }
-QPushButton#appointmentView {
-    background: white; border: 1px solid #cbd6e5; border-radius: 4px; padding: 3px 10px;
-}
-QPushButton#appointmentView:hover { background: #f0f5fd; }
-QPushButton#appointmentView:checked { background: #eaf2ff; color: #175cd3; font-weight: 600; }
-QPushButton#appointmentView:focus { border-color: #175cd3; }
-QTableWidget { background: white; border: 1px solid #dce3ec;
-    border-radius: 6px; gridline-color: #e8edf3; selection-background-color: #eaf2ff;
-    selection-color: #243247; alternate-background-color: #f8fafc; }
-QHeaderView::section { background: #edf1f7; padding: 9px; border: none;
-    border-bottom: 1px solid #dce3ec; font-weight: 600; }
-QStatusBar { background: white; color: #596980; border-top: 1px solid #dce3ec; }
-"""
 
 
 def label(text: str, name: str = "", wrap: bool = False) -> QLabel:
@@ -90,7 +58,7 @@ class NavigationDelegate(QStyledItemDelegate):
             option = QStyleOptionViewItem(option)
             rect = option.rect
             painter.save()
-            painter.setPen(QColor("#dce3ec"))
+            painter.setPen(option.palette.color(QPalette.ColorRole.Mid))
             painter.drawLine(rect.left() + 10, rect.top() + 5, rect.right() - 10, rect.top() + 5)
             painter.restore()
             option.rect = rect.adjusted(0, 12, 0, 0)
@@ -105,7 +73,12 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(self.windowTitle() + " — демонстрационный режим")
         self.resize(1100, 720)
         self.setMinimumSize(800, 540)
-        self.setStyleSheet(STYLESHEET)
+        self.db_path = db_path
+        self.backup_preferences = QSettings(
+            str(db_path.with_suffix(".ini")), QSettings.Format.IniFormat, self
+        )
+        theme = self.backup_preferences.value(THEME_KEY, "light", type=str)
+        apply_theme(QApplication.instance(), "dark" if theme == "dark" else "light")
 
         root = QWidget()
         layout = QHBoxLayout(root)
@@ -127,6 +100,7 @@ class MainWindow(QMainWindow):
             side_layout.addWidget(label("Демонстрационный режим. Отдельные данные.", "muted", True))
         side_layout.addSpacing(24)
         self.navigation = QListWidget()
+        self.navigation.setObjectName("navigation")
         self.navigation.setAccessibleName("Разделы программы")
         self.navigation.addItems(SECTIONS)
         self.navigation.setItemDelegate(NavigationDelegate(self.navigation))
@@ -137,73 +111,19 @@ class MainWindow(QMainWindow):
         layout.addWidget(sidebar)
 
         self.pages = QStackedWidget()
-        self.db_path = db_path
-        self.backup_preferences = QSettings(
-            str(db_path.with_suffix(".ini")), QSettings.Format.IniFormat, self
-        )
         self.records = Records(db_path)
         self.vehicles_page = VehiclesPage(self.records)
         self.customers_page = CustomersPage(self.records)
         self.calls_page = CallsPage(self.records, "Звонки")
         self.appointments_page = AppointmentsPage(self.records)
         self.calls_page.appointment_requested.connect(self.schedule_from_call)
-        for name in SECTIONS:
-            if name == "Автомобили":
-                self.pages.addWidget(self.vehicles_page)
-                continue
-            if name == "Клиенты":
-                self.pages.addWidget(self.customers_page)
-                continue
-            if name == "Звонки":
-                self.pages.addWidget(self.calls_page)
-                continue
-            if name == "Записи":
-                self.pages.addWidget(self.appointments_page)
-                continue
-            page = QWidget()
-            content = QVBoxLayout(page)
-            content.setContentsMargins(32, 30, 32, 24)
-            content.setSpacing(12)
-            content.addWidget(label(name, "title"))
-            if name == "Настройки":
-                content.addWidget(label("Хранение данных", "badge"))
-                path_label = label(str(db_path), "", True)
-                path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-                content.addWidget(path_label)
-                content.addWidget(
-                    label(
-                        "Для восстановления нужна резервная копия .sqlite3. Храните её на другом "
-                        "диске или флешке. Перед восстановлением программа сохранит текущую базу "
-                        "отдельно.",
-                        "muted",
-                        True,
-                    )
-                )
-                self.backup_status = label("", "muted", True)
-                self.show_backup_date(
-                    QDateTime.fromString(
-                        self.backup_preferences.value(LAST_BACKUP_KEY, "", type=str),
-                        Qt.DateFormat.ISODate,
-                    )
-                )
-                content.addWidget(self.backup_status)
-                backup_button = QPushButton("Создать резервную копию")
-                backup_button.clicked.connect(self.create_backup)
-                content.addWidget(backup_button)
-                restore_button = QPushButton("Восстановить из копии")
-                restore_button.clicked.connect(self.restore_backup)
-                content.addWidget(restore_button)
-                content.addWidget(
-                    label("TXT и Excel — выгрузки для просмотра и работы с данными.", "muted", True)
-                )
-                export_button = QPushButton("Экспорт базы в TXT / Excel")
-                export_button.clicked.connect(self.export_data)
-                content.addWidget(export_button)
-                document_settings = QPushButton("Реквизиты для квитанций")
-                document_settings.clicked.connect(self.document_settings)
-                content.addWidget(document_settings)
-            if name != "Автомобили":
-                content.addStretch()
+        for page in (
+            self.vehicles_page,
+            self.customers_page,
+            self.calls_page,
+            self.appointments_page,
+            self.settings_page(theme),
+        ):
             self.pages.addWidget(page)
         layout.addWidget(self.pages, 1)
         self.setCentralWidget(root)
@@ -221,6 +141,92 @@ class MainWindow(QMainWindow):
         search_shortcut.activated.connect(self.focus_search)
         help_shortcut = QShortcut(QKeySequence("F1"), self)
         help_shortcut.activated.connect(self.show_help)
+
+    def settings_page(self, theme):
+        scroll = QScrollArea()
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        page = QWidget()
+        content = QVBoxLayout(page)
+        content.setContentsMargins(32, 30, 32, 24)
+        content.setSpacing(12)
+        content.addWidget(label("Настройки", "title"))
+
+        appearance = self.settings_group(content, "Оформление")
+        row = QHBoxLayout()
+        caption = label("Тема")
+        self.theme_select = QComboBox()
+        self.theme_select.addItem("Светлая", "light")
+        self.theme_select.addItem("Тёмная", "dark")
+        self.theme_select.setCurrentIndex(1 if theme == "dark" else 0)
+        self.theme_select.currentIndexChanged.connect(self.change_theme)
+        caption.setBuddy(self.theme_select)
+        row.addWidget(caption)
+        row.addWidget(self.theme_select)
+        row.addStretch()
+        appearance.addLayout(row)
+
+        storage = self.settings_group(content, "Резервные копии")
+        path_label = label(str(self.db_path), "muted", True)
+        path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        storage.addWidget(path_label)
+        self.backup_status = label("", "muted", True)
+        self.show_backup_date(
+            QDateTime.fromString(
+                self.backup_preferences.value(LAST_BACKUP_KEY, "", type=str), Qt.DateFormat.ISODate
+            )
+        )
+        storage.addWidget(self.backup_status)
+        backup = primary_button("Создать резервную копию")
+        backup.clicked.connect(self.create_backup)
+        restore = QPushButton("Восстановить из копии")
+        restore.clicked.connect(self.restore_backup)
+        row = QHBoxLayout()
+        row.addWidget(backup)
+        row.addWidget(restore)
+        row.addStretch()
+        storage.addLayout(row)
+        storage.addWidget(
+            label(
+                "Для восстановления нужна копия .sqlite3. Храните её на другом диске или флешке.",
+                "muted",
+                True,
+            )
+        )
+
+        documents = self.settings_group(content, "Документы и экспорт")
+        receipts = QPushButton("Реквизиты для квитанций")
+        receipts.clicked.connect(self.document_settings)
+        export = QPushButton("Экспорт базы в TXT / Excel")
+        export.clicked.connect(self.export_data)
+        row = QHBoxLayout()
+        row.addWidget(receipts)
+        row.addWidget(export)
+        row.addStretch()
+        documents.addLayout(row)
+        content.addStretch()
+        scroll.setWidget(page)
+        return scroll
+
+    @staticmethod
+    def settings_group(parent, title):
+        frame = QFrame()
+        frame.setObjectName("settingsGroup")
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(14, 10, 14, 12)
+        layout.addWidget(label(title, "sectionTitle"))
+        parent.addWidget(frame)
+        return layout
+
+    def change_theme(self):
+        theme = self.theme_select.currentData()
+        apply_theme(QApplication.instance(), theme)
+        self.backup_preferences.setValue(THEME_KEY, theme)
+        self.backup_preferences.sync()
+        if self.backup_preferences.status() != QSettings.Status.NoError:
+            QMessageBox.warning(
+                self, "Не удалось сохранить тему", "Оформление действует до закрытия программы."
+            )
 
     def refresh_page(self, index):
         page = self.pages.widget(index)

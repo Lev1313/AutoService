@@ -8,7 +8,7 @@ from app.database.connection import backup_database, initialize_database, restor
 from app.services.catalog import VehicleCatalog, builtin_catalog
 from app.services.documents import Documents
 from app.services.records import Records
-from app.ui.customers import CustomerCard, CustomerDialog
+from app.ui.customers import CustomerCard, CustomerDialog, CustomerVehiclePicker
 from app.ui.vehicles import VehicleDialog
 
 
@@ -44,6 +44,37 @@ def test_standalone_customer_search_and_reopen(records):
     with pytest.raises(ValueError, match="не найден"):
         records.save_contact({"name": "Другой"}, client + 100)
     assert len(records.contacts()) == 1
+
+
+def test_attach_existing_car_from_customer_card(application, records, monkeypatch):
+    owner = records.save_contact({"name": "Тестовый первый"})
+    customer = records.save_contact({"name": "Тестовый второй"})
+    vehicle = link_car(records, owner, plate="ТЕСТ-А123")
+    repair = records.save_repair(vehicle, {"visit_date": "2026-11-01", "description": "Тест"})
+    decisions = iter((QMessageBox.StandardButton.No, QMessageBox.StandardButton.Yes))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_: next(decisions))
+
+    def interact(picker):
+        picker.search.setText("теста123")
+        assert picker.table.rowCount() == 1
+        assert picker.table.item(0, 3).text() == "Тестовый первый"
+        picker.attach_button.click()
+        assert records.vehicle(vehicle)["contact_id"] == owner
+        picker.attach_button.click()
+        return picker.result()
+
+    monkeypatch.setattr(CustomerVehiclePicker, "exec", interact)
+    card = CustomerCard(records, customer)
+    card.add_vehicle_button.click()
+    assert card.rows[0]["id"] == vehicle
+    assert records.repairs(vehicle)[0]["id"] == repair
+    assert records.contact_vehicles(owner) == []
+    assert len(records.vehicles()) == 1
+    picker = CustomerVehiclePicker(records, customer, card)
+    assert picker.table.item(0, 3).text() == "Уже добавлен"
+    assert not picker.attach_button.isEnabled()
+    with pytest.raises(ValueError, match="Клиент автомобиля изменился"):
+        records.assign_vehicle_contact(vehicle, owner, previous_contact_id=None)
 
 
 def test_shared_customer_edit_preserves_cars_repairs_and_issued_pdf(records):

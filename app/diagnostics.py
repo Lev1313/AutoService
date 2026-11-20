@@ -35,6 +35,7 @@ from app.services.export_data import export_database
 from app.services.maintenance import Maintenance
 from app.services.records import Records
 from app.services.txt_import import TxtImport
+from app.ui.customers import CustomerVehiclePicker
 from app.ui.documents import DocumentDialog, print_pdf
 from app.ui.help import HelpDialog
 from app.version import VERSION
@@ -302,11 +303,22 @@ def reopen(root, report):
         check(window.customers_page.table.rowCount() == 1, "Поиск клиентов в EXE")
         check(window.customers_page.rows[0]["id"] == report["customer_id"], "Клиент из общей базы")
         check(window.grab().save(str(root / "customers-window.png")), "Снимок клиентов")
+        picker = CustomerVehiclePicker(records, report["customer_id"], window)
+        picker.search.setText("тестпилот")
+        check(picker.table.rowCount() == 1, "Поиск существующей машины в карточке клиента")
+        check(not picker.attach_button.isEnabled(), "Машину нельзя привязать повторно")
+        picker.close()
         window.navigation.setCurrentRow(window.pages.indexOf(window.vehicles_page))
         window.vehicles_page.search.setText("тестпилот")
         QTest.qWait(350)
         check(window.vehicles_page.table.rowCount() == 1, "Поиск в собранном интерфейсе")
         check(window.grab().save(str(root / "window.png")), "Снимок окна")
+        window.navigation.setCurrentRow(window.navigation.count() - 1)
+        window.theme_select.setCurrentIndex(window.theme_select.findData("dark"))
+        check(application.property("appearanceTheme") == "dark", "Переключение темы")
+        QTest.qWait(150)
+        check(window.grab().save(str(root / "dark-settings.png")), "Снимок тёмной темы")
+        window.theme_select.setCurrentIndex(window.theme_select.findData("light"))
 
         help_dialog = HelpDialog(window)
         check(help_dialog.tabs.count() == 2, "Только инструкция в приложении")

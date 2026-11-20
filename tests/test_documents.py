@@ -287,6 +287,7 @@ def test_document_dialog_preview_save_history_and_stale_preview_guard(
     assert service.history(repair) == []
     assert not dialog.export_button.isEnabled()
     assert dialog.print_button.text() == "Оформить и печатать"
+    assert dialog.document_status.text() == "Черновик"
     dialog.description.setPlainText("Изменённый текст документа")
     assert dialog.content is None
     QTest.qWait(dialog.preview_timer.interval() + 100)
@@ -298,6 +299,7 @@ def test_document_dialog_preview_save_history_and_stale_preview_guard(
     assert service.draft(repair) is None
     assert dialog.export_button.isEnabled()
     assert dialog.print_button.text() == "Печать"
+    assert dialog.document_status.text().startswith("Оформлена · ")
     assert not dialog.create_button.isEnabled()
     dialog.reject()
     corrected = "Уточнённое описание ремонта"
@@ -317,7 +319,7 @@ def test_document_dialog_preview_save_history_and_stale_preview_guard(
     assert reopened.history.currentIndex() == -1
     assert reopened.description.toPlainText() == "Редактирование второго черновика"
     reopened.draft_button.click()
-    assert "Черновик сохранён" in reopened.message.text()
+    assert reopened.document_status.text() == "Черновик сохранён"
     reopened.history.setCurrentIndex(reopened.history.findData(document["id"]))
     assert reopened.current_document["id"] == document["id"]
     assert len(service.history(repair)) == 1

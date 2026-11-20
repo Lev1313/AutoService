@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
+    QHeaderView,
     QLineEdit,
     QMessageBox,
     QPushButton,
@@ -29,6 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.services.appointments import ACTIVE_STATUSES, STATUSES, Appointments
+from app.ui.theme import STATUS_TONE, StatusDelegate
 from app.ui.vehicles import (
     ERRORS,
     RepairDialog,
@@ -226,23 +228,6 @@ class MonthCalendar(QScrollArea):
             self.grid.addWidget(label, 0, column)
             self.grid.setColumnStretch(column, 1)
         self.setWidget(content)
-        content.setStyleSheet("""
-            QFrame#calendarDay { background: white; border: 1px solid #d4deec; border-radius: 4px; }
-            QFrame#calendarDay[outsideMonth="true"] { background: #edf1f7; }
-            QFrame#calendarDay[today="true"] { border: 2px solid #4c7bc2; }
-            QPushButton#calendarDate, QPushButton#calendarVisit {
-                min-width: 0; min-height: 0; padding: 2px 4px; text-align: left;
-                border: 1px solid transparent; border-radius: 3px;
-            }
-            QPushButton#calendarDate { background: transparent; }
-            QPushButton#calendarVisit { background: #dceaff; color: #173f76; }
-            QPushButton#calendarVisit[arrived="true"] { background: #dcefe5; color: #1b5537; }
-            QPushButton#calendarVisit[inactive="true"] { background: #edf1f7; color: #516279; }
-            QPushButton#calendarDate:hover, QPushButton#calendarVisit:hover,
-            QPushButton#calendarDate:focus, QPushButton#calendarVisit:focus {
-                border-color: #4c7bc2;
-            }
-        """)
 
     def refresh(self, date):
         while self.grid.count() > 7:
@@ -271,6 +256,7 @@ class MonthCalendar(QScrollArea):
             day_entries = entries[day.toString(ISO)]
             button = self.date_button(str(day.day()), day)
             button.setAccessibleName(day.toString("dd.MM.yyyy"))
+            button.setProperty("today", day == today)
             layout.addWidget(button)
             for entry in day_entries[:2]:
                 layout.addWidget(self.visit_button(entry))
@@ -353,7 +339,12 @@ class AppointmentsPage(QWidget):
         self.day_view = QWidget()
         daily_layout = QVBoxLayout(self.day_view)
         daily_layout.setContentsMargins(0, 0, 0, 0)
-        self.table = make_table(("Приезд", "Автомобиль", "Контакт", "Причина визита", "Статус"))
+        self.table = make_table(("Приезд", "Автомобиль", "Контакт", "Причина", "Статус"))
+        self.table.setItemDelegateForColumn(4, StatusDelegate(self.table))
+        header = self.table.horizontalHeader()
+        for column, width in ((0, 92), (2, 110), (4, 115)):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
+            self.table.setColumnWidth(column, width)
         self.table.setAccessibleName("Записи выбранного дня")
         self.table.cellActivated.connect(lambda *_: self.open_selected())
         self.table.itemSelectionChanged.connect(self.update_selection)
@@ -422,8 +413,15 @@ class AppointmentsPage(QWidget):
             if row["duration_minutes"]:
                 time_text += f" · {row['duration_minutes']} мин"
             status = STATUSES[row["status"]]
+            tone = {
+                "scheduled": "active",
+                "arrived": "done",
+                "cancelled": "muted",
+                "no_show": "muted",
+            }[row["status"]]
             if row["status"] == "scheduled" and starts_at < now.replace(second=0, microsecond=0):
                 status = "Время прошло"
+                tone = "attention"
             contact = " · ".join(part for part in (row["contact_name"], row["phone"]) if part)
             values = (
                 time_text,
@@ -435,6 +433,8 @@ class AppointmentsPage(QWidget):
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setToolTip(value)
+                if column == 4:
+                    item.setData(STATUS_TONE, tone)
                 self.table.setItem(index, column, item)
             if row["id"] == selected_id:
                 self.table.selectRow(index)

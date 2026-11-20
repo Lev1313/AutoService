@@ -1,7 +1,7 @@
 """Настраиваемое ТО и список звонков без автоматического распознавания заметок."""
 
-from PySide6.QtCore import QDate, Signal
-from PySide6.QtGui import QColor, QTextCharFormat
+from PySide6.QtCore import QDate, QDateTime, QLocale, Qt, Signal
+from PySide6.QtGui import QPalette, QTextCharFormat
 from PySide6.QtWidgets import (
     QCalendarWidget,
     QCheckBox,
@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 
 from app.services.maintenance import Maintenance, optional_integer
 from app.services.records import Records
-from app.ui.vehicles import ERRORS, SafeDialog, make_table, plain_label
+from app.ui.vehicles import ERRORS, SafeDialog, make_table, plain_label, primary_button
 
 
 def formatted_date(value):
@@ -87,7 +87,7 @@ class PlanDialog(SafeDialog):
         cancel = QPushButton("Отмена")
         cancel.clicked.connect(self.reject)
         buttons.addWidget(cancel)
-        self.save_button = QPushButton("Сохранить правило")
+        self.save_button = primary_button("Сохранить правило")
         self.save_button.clicked.connect(self.save)
         buttons.addWidget(self.save_button)
         layout.addLayout(buttons)
@@ -154,7 +154,7 @@ class CompletionDialog(SafeDialog):
         cancel.clicked.connect(self.reject)
         row.addWidget(cancel)
         row.addStretch()
-        self.save_button = QPushButton("Начать новый цикл ТО")
+        self.save_button = primary_button("Начать новый цикл ТО")
         self.save_button.clicked.connect(self.save)
         row.addWidget(self.save_button)
         layout.addLayout(row)
@@ -215,7 +215,7 @@ class PlansDialog(QDialog):
         self.table = make_table(("Работа", "Месяцев", "Километров", "Последнее ТО", "Приглашения"))
         layout.addWidget(self.table, 1)
         row = QHBoxLayout()
-        self.add_button = QPushButton("Добавить правило")
+        self.add_button = primary_button("Добавить правило")
         self.add_button.clicked.connect(self.add)
         row.addWidget(self.add_button)
         self.edit_button = QPushButton("Изменить")
@@ -309,7 +309,7 @@ class CallResultDialog(SafeDialog):
         cancel.clicked.connect(self.reject)
         row.addWidget(cancel)
         row.addStretch()
-        self.save_button = QPushButton("Сохранить результат")
+        self.save_button = primary_button("Сохранить результат")
         self.save_button.clicked.connect(self.save)
         row.addWidget(self.save_button)
         layout.addLayout(row)
@@ -361,7 +361,6 @@ class CallsPage(QWidget):
         self.unknown_button = QPushButton("Уточнить срок")
         self.unknown_button.clicked.connect(self.show_unknown)
         mode_row.addWidget(self.unknown_button)
-        mode_row.addStretch()
         layout.addLayout(mode_row)
         self.calendar = QCalendarWidget()
         self.calendar.setGridVisible(True)
@@ -371,8 +370,6 @@ class CallsPage(QWidget):
         self.calendar.setVisible(False)
         self.calendar_note = plain_label("")
         self.calendar_note.setVisible(False)
-        layout.addWidget(self.calendar_note)
-        row = QHBoxLayout()
         self.filter = QComboBox()
         for name, key in (
             ("Сегодня и просроченные", "due"),
@@ -385,12 +382,13 @@ class CallsPage(QWidget):
         ):
             self.filter.addItem(name, key)
         self.filter.currentIndexChanged.connect(self.refresh)
-        row.addWidget(self.filter)
-        row.addStretch()
+        self.filter.setAccessibleName("Какие звонки показать")
+        mode_row.addWidget(self.filter)
+        mode_row.addStretch()
         update = QPushButton("Обновить")
         update.clicked.connect(self.refresh)
-        row.addWidget(update)
-        layout.addLayout(row)
+        mode_row.addWidget(update)
+        layout.addWidget(self.calendar_note)
         self.table = make_table(("Позвонить", "Автомобиль", "Контакт / телефон", "Повод"))
         self.table.itemSelectionChanged.connect(self.describe)
         self.table.cellDoubleClicked.connect(lambda *_: self.open_car())
@@ -400,13 +398,14 @@ class CallsPage(QWidget):
         layout.addLayout(body, 1)
         self.details = QPlainTextEdit()
         self.details.setReadOnly(True)
-        self.details.setMaximumHeight(180)
+        self.details.setMaximumHeight(104)
+        self.details.setAccessibleName("Причина и история звонков")
         layout.addWidget(self.details)
         row = QHBoxLayout()
         self.open_button = QPushButton("Открыть автомобиль")
         self.open_button.clicked.connect(self.open_car)
         row.addWidget(self.open_button)
-        self.result_button = QPushButton("Результат звонка")
+        self.result_button = primary_button("Результат звонка")
         self.result_button.clicked.connect(self.result)
         row.addWidget(self.result_button)
         self.appointment_button = QPushButton("Записать на ремонт")
@@ -464,7 +463,8 @@ class CallsPage(QWidget):
                     )
                 self.marked_dates = {task["due_date"] for task in filtered if task["due_date"]}
                 highlight = QTextCharFormat()
-                highlight.setBackground(QColor("#dceaff"))
+                highlight.setBackground(self.palette().color(QPalette.ColorRole.Highlight))
+                highlight.setForeground(self.palette().color(QPalette.ColorRole.HighlightedText))
                 highlight.setFontWeight(700)
                 for value in self.marked_dates:
                     self.calendar.setDateTextFormat(
@@ -503,6 +503,7 @@ class CallsPage(QWidget):
             self.open_button.setEnabled(bool(self.rows))
             self.result_button.setEnabled(bool(self.rows))
             self.appointment_button.setEnabled(bool(self.rows))
+            self.details.setVisible(bool(self.rows))
             self.details.clear()
             if self.rows:
                 self.table.selectRow(0)
@@ -523,13 +524,19 @@ class CallsPage(QWidget):
             "declined": "Приглашения отключены",
             "reopen": "Возвращено в список",
         }
-        history = "\n".join(
-            f"{row['attempted_at']}: {titles[row['outcome']]} · {row['note']}" for row in attempts
-        )
+        history = []
+        current_year = QDate.currentDate().year()
+        for row in attempts:
+            when = QDateTime.fromString(row["attempted_at"], Qt.DateFormat.ISODate)
+            display = "d MMM, HH:mm" if when.date().year() == current_year else "d MMM yyyy, HH:mm"
+            timestamp = QLocale().toString(when, display) if when.isValid() else row["attempted_at"]
+            history.append(
+                " · ".join(filter(None, (timestamp, titles[row["outcome"]], row["note"])))
+            )
         self.details.setPlainText(
             ("Дата звонка задана вручную.\n" if task["manual_date"] else "")
             + task["details"]
-            + (f"\n\nИстория звонков:\n{history}" if history else "")
+            + ("\n\nИстория звонков\n" + "\n".join(history) if history else "")
         )
 
     def open_car(self):

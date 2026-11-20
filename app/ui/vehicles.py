@@ -34,6 +34,7 @@ from app.services.records import (
     parse_amount,
     search_key,
 )
+from app.ui.theme import STATUS_TONE, StatusDelegate
 
 ERRORS = (ValueError, OSError, sqlite3.Error)
 
@@ -534,11 +535,16 @@ class VehicleCard(QDialog):
         maintenance_button.clicked.connect(self.open_maintenance)
         row.addWidget(maintenance_button)
         row.addStretch()
-        self.add_repair_button = QPushButton("Добавить ремонт")
+        self.add_repair_button = primary_button("Добавить ремонт")
         self.add_repair_button.clicked.connect(self.add_repair)
         row.addWidget(self.add_repair_button)
         layout.addLayout(row)
         self.history = make_table(("Дата", "Пробег, км", "Описание", "Стоимость, ₽", "Запись"))
+        header = self.history.horizontalHeader()
+        for column, width in ((0, 95), (1, 108), (3, 100), (4, 135)):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
+            self.history.setColumnWidth(column, width)
+        self.history.setItemDelegateForColumn(4, StatusDelegate(self.history))
         self.history.setAccessibleName("История ремонтов")
         self.history.cellDoubleClicked.connect(lambda *_: self.open_repair())
         self.history.itemSelectionChanged.connect(self.show_description)
@@ -562,11 +568,11 @@ class VehicleCard(QDialog):
         bottom.addWidget(self.document_button)
         self.delete_button = QPushButton("Удалить ремонт")
         self.delete_button.clicked.connect(self.toggle_deleted)
-        bottom.addWidget(self.delete_button)
         self.source_button = QPushButton("Исходный TXT")
         self.source_button.clicked.connect(self.open_source)
         bottom.addWidget(self.source_button)
         bottom.addStretch()
+        bottom.addWidget(self.delete_button)
         close = QPushButton("Закрыть")
         close.clicked.connect(self.accept)
         bottom.addWidget(close)
@@ -620,7 +626,17 @@ class VehicleCard(QDialog):
                 ),
             )
             for column, value in enumerate(values):
-                self.history.setItem(index, column, QTableWidgetItem(value))
+                item = QTableWidgetItem(value)
+                item.setToolTip(value)
+                if column == 4:
+                    tone = {
+                        "Удалён": "muted",
+                        "Импорт: статус не уточнён": "attention",
+                        "В истории": "done",
+                        "Текущий": "active",
+                    }[value]
+                    item.setData(STATUS_TONE, tone)
+                self.history.setItem(index, column, item)
         if self.rows:
             self.history.selectRow(
                 next((i for i, row in enumerate(self.rows) if row["id"] == repair_id), 0)

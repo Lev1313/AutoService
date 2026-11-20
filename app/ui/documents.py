@@ -126,6 +126,11 @@ class DocumentDialog(SafeDialog):
         self.resize(1180, 790)
         self.setMinimumSize(850, 580)
         layout = QVBoxLayout(self)
+        self.document_status = plain_label("")
+        self.document_status.setWordWrap(False)
+        self.document_status.setObjectName("badge")
+        self.document_status.setAccessibleName("Статус квитанции")
+        layout.addWidget(self.document_status, alignment=Qt.AlignmentFlag.AlignLeft)
         history_row = QHBoxLayout()
         history_label = plain_label("Оформленные квитанции")
         history_row.addWidget(history_label)
@@ -205,9 +210,8 @@ class DocumentDialog(SafeDialog):
         self.create_button.setAutoDefault(False)
         self.create_button.clicked.connect(self.create)
         bottom.addWidget(self.create_button)
-        self.print_button = QPushButton()
+        self.print_button = primary_button("")
         self.print_button.setAutoDefault(False)
-        self.print_button.setStyleSheet("font-weight: 600;")
         self.print_button.clicked.connect(self.print_or_create)
         bottom.addWidget(self.print_button)
         close = QPushButton("Закрыть")
@@ -272,6 +276,7 @@ class DocumentDialog(SafeDialog):
             self.apply_selection(index)
         except (*ERRORS, RuntimeError) as error:
             self.busy = False
+            self.document_status.setText("Квитанция недоступна")
             self.clear_preview("Квитанцию не удалось открыть.")
             self.original = self.state()
             QMessageBox.warning(self, "Не удалось открыть документ", str(error))
@@ -302,6 +307,7 @@ class DocumentDialog(SafeDialog):
         )
         self.current_document = self.service.get(document_id) if saved else None
         if self.current_document:
+            self.document_status.setText(f"Оформлена · {self.current_document['number']}")
             payload = self.current_document["payload"]
             values = {
                 "kind": self.current_document["kind"],
@@ -317,6 +323,7 @@ class DocumentDialog(SafeDialog):
                 ],
             }
         else:
+            self.document_status.setText("Черновик" if editable else "Квитанций нет")
             with_repair = self.service.draft(self.repair_id)
             with_repair = with_repair or {
                 "kind": "simple",
@@ -335,12 +342,9 @@ class DocumentDialog(SafeDialog):
         self.update_total()
         if saved:
             self.load_pdf(self.service.pdf_content(self.current_document["id"]))
-            self.message.setText(
-                f"Квитанция {self.current_document['number']} оформлена и сохранена. "
-                "Предпросмотр показан здесь. В окне Windows выберите принтер."
-            )
+            self.message.setText("В окне печати Windows выберите принтер.")
         elif editable:
-            self.message.setText("Черновик. Квитанция получит номер при оформлении.")
+            self.message.setText("Квитанция получит номер при оформлении.")
             self.preview()
         else:
             self.clear_preview(
@@ -419,7 +423,8 @@ class DocumentDialog(SafeDialog):
             return
         self.items_panel.setVisible(self.kind.currentData() == "detailed")
         self.clear_preview("Обновляем предпросмотр…")
-        self.message.setText("Черновик. Квитанция получит номер при оформлении.")
+        self.document_status.setText("Черновик")
+        self.message.setText("Квитанция получит номер при оформлении.")
         self.update_total()
         self.preview_timer.start()
 
@@ -508,7 +513,8 @@ class DocumentDialog(SafeDialog):
         if close:
             self.accept()
         elif not self.current_document:
-            self.message.setText("Черновик сохранён. Квитанция получит номер при оформлении.")
+            self.document_status.setText("Черновик сохранён")
+            self.message.setText("Квитанция получит номер при оформлении.")
         return True
 
     def settings(self):

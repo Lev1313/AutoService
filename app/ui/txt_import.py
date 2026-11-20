@@ -30,6 +30,7 @@ from app.services.maintenance import optional_integer
 from app.services.records import amount_text, parse_amount
 from app.services.txt_import import TxtImport
 from app.services.txt_parser import parse_date, split_fragment
+from app.ui.theme import set_primary
 from app.ui.vehicles import ERRORS, plain_label
 
 
@@ -103,9 +104,9 @@ class ImportDialog(QDialog):
         folder = QPushButton("Выбрать папку TXT")
         folder.clicked.connect(self.choose_folder)
         top.addWidget(folder)
-        files = QPushButton("Добавить файлы")
-        files.clicked.connect(self.choose_files)
-        top.addWidget(files)
+        self.files_button = QPushButton("Добавить файлы")
+        self.files_button.clicked.connect(self.choose_files)
+        top.addWidget(self.files_button)
         self.encoding = QComboBox()
         for title, value in (
             ("Определить кодировку", "auto"),
@@ -212,7 +213,9 @@ class ImportDialog(QDialog):
         self.summary = plain_label(
             "Выберите папку или файлы. До подтверждения импорт не выполняется."
         )
-        layout.addWidget(self.summary)
+        self.summary.setObjectName("badge")
+        self.summary.setWordWrap(False)
+        layout.addWidget(self.summary, alignment=Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(
             plain_label(
                 "Перед импортом создаётся копия базы. "
@@ -486,11 +489,15 @@ class ImportDialog(QDialog):
 
     def refresh_summary(self):
         count = sum(entry["confirmed"] and not entry["fragment"].imported for entry in self.entries)
+        has_candidates = any(not entry["fragment"].imported for entry in self.entries)
         self.summary.setText(
-            f"Файлов: {len(self.sources)} · Записей: {len(self.entries)} · "
-            f"Подтверждено: {count} · Ошибок чтения: {len(self.errors)}"
+            f"Готово к импорту: {count} · Записей: {len(self.entries)} · "
+            f"Файлов: {len(self.sources)} · Ошибок чтения: {len(self.errors)}"
         )
         self.import_button.setEnabled(count > 0)
+        set_primary(self.files_button, not has_candidates)
+        set_primary(self.confirm_button, has_candidates and count == 0)
+        set_primary(self.import_button, count > 0)
 
     def split_current(self):
         if self.current is None or self.current["fragment"].imported:

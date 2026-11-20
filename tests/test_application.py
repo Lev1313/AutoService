@@ -3,6 +3,7 @@ import subprocess
 import sys
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPalette
 from PySide6.QtTest import QTest
 
 from app.bootstrap import create_window
@@ -30,6 +31,26 @@ def test_user_data_path(monkeypatch, tmp_path):
     assert data_directory() == tmp_path / "AutoService"
     assert database_path() == tmp_path / "AutoService" / "autoservice.sqlite3"
     assert not data_directory().exists()
+
+
+def test_appearance_switch_persists_for_the_same_database(application, tmp_path):
+    path = tmp_path / "test.sqlite3"
+    window = create_window(path)
+    light = application.palette().color(QPalette.ColorRole.Window)
+    window.theme_select.setCurrentIndex(window.theme_select.findData("dark"))
+    dark = application.palette().color(QPalette.ColorRole.Window)
+    assert dark.lightness() < light.lightness()
+    assert application.property("appearanceTheme") == "dark"
+    window.close()
+
+    reopened = create_window(path)
+    try:
+        assert reopened.theme_select.currentData() == "dark"
+        assert application.palette().color(QPalette.ColorRole.Window) == dark
+        reopened.theme_select.setCurrentIndex(reopened.theme_select.findData("light"))
+        assert application.palette().color(QPalette.ColorRole.Window) == light
+    finally:
+        reopened.close()
 
 
 def test_window_and_navigation(application, tmp_path):

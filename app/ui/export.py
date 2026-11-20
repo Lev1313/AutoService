@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.services.export_data import export_database
-from app.ui.vehicles import ERRORS, plain_label
+from app.ui.vehicles import ERRORS, plain_label, primary_button
 
 
 class ExportDialog(QDialog):
@@ -63,7 +63,7 @@ class ExportDialog(QDialog):
         cancel.clicked.connect(self.reject)
         row.addWidget(cancel)
         row.addStretch()
-        self.export_button = QPushButton("Выгрузить")
+        self.export_button = primary_button("Выгрузить")
         self.export_button.clicked.connect(self.export)
         row.addWidget(self.export_button)
         layout.addLayout(row)
