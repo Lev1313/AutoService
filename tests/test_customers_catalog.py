@@ -133,16 +133,33 @@ def test_catalog_available_on_empty_database_and_learns_saved_names(records):
     assert catalog.models("") == []
     records.save_vehicle({"make": "Своя вымышленная марка", "model": "Своя модель"})
     records.save_vehicle({"make": "Volkswagen", "model": "Особая модель владельца"})
+    records.save_vehicle({"make": "Фольксваген", "model": "Special Edition"})
+    records.save_vehicle({"make": "Test Motors", "model": "Prototype"})
     reopened = VehicleCatalog(Records(records.path))
-    assert "Своя вымышленная марка" in reopened.makes()
-    assert reopened.models("Своя вымышленная марка") == ["Своя модель"]
-    assert "Особая модель владельца" in reopened.models("volkswagen")
-    assert "Особая модель владельца" not in reopened.models("Toyota")
+    assert "Своя вымышленная марка" not in reopened.makes()
+    assert "Фольксваген" not in reopened.makes()
+    assert "VW" not in reopened.makes()
+    assert "Test Motors" in reopened.makes()
+    assert reopened.models("Test Motors") == ["Prototype"]
+    assert reopened.models("Своя вымышленная марка") == []
+    assert "Особая модель владельца" not in reopened.models("volkswagen")
+    assert "Special Edition" in reopened.models("volkswagen")
+    assert "Special Edition" not in reopened.models("Toyota")
 
 
 def test_vehicle_suggestions_preserve_manual_model_and_link_selected_client(application, records):
     client = records.save_contact({"name": "Вымышленный контакт", "phone": "000-123"})
     dialog = VehicleDialog(records)
+    for query, expected in (
+        ("фольксваген", "Volkswagen"),
+        ("VW", "Volkswagen"),
+        ("шкода", "Skoda"),
+    ):
+        completer = dialog.make_completer
+        completer.setCompletionPrefix(query)
+        index = completer.completionModel().index(0, 0)
+        assert index.data() == expected
+        assert completer.pathFromIndex(index) == expected
     dialog.fields["make"].setText("Volkswagen")
     assert "Golf" in dialog.model_suggestions.stringList()
     dialog.fields["model"].setText("Свой вариант модели")
@@ -168,6 +185,7 @@ def test_vehicle_suggestions_preserve_manual_model_and_link_selected_client(appl
     dialog.save()
     assert dialog.result() == QDialog.DialogCode.Accepted
     assert records.vehicle(dialog.vehicle_id)["contact_id"] == client
+    assert records.vehicle(dialog.vehicle_id)["model"] == "Свой вариант модели"
     assert len(records.contacts()) == 1
 
 
@@ -224,24 +242,42 @@ def test_customer_page_refreshes_existing_contacts_after_navigation(application,
 
 def test_catalog_overlay_keeps_source_and_separates_sport_models(records):
     import hashlib
+    import unicodedata
     from pathlib import Path
 
-    from app.services.catalog import name_key
+    from app.services.catalog import model_names, name_key
 
     source = Path(__file__).resolve().parents[1] / "app/assets/car_models.json"
     assert hashlib.sha256(source.read_bytes().replace(b"\r\n", b"\n")).hexdigest() == (
         "42c74b1906cd43ff119081ad6dda1f015424b43c642c17eb436d5e252ec04f3b"
     )
     catalog = VehicleCatalog(records)
-    for make in builtin_catalog():
-        names = catalog.models(make)
-        assert not any("serisi" in name.casefold() for name in names)
+    makes = catalog.makes()
+    assert len(makes) == 94
+    all_names = set(makes)
+    for make, original_models in builtin_catalog().items():
+        names = set(catalog.models(make))
+        assert {name for model in original_models for name in model_names(make, model)} <= names
         assert len(names) == len({name_key(name) for name in names})
-    assert {"1 серия", "1M", "M1", "3 серия", "M3", "X3", "X3 M"} <= set(catalog.models("БМВ"))
-    assert {"A-класс", "C-класс", "E-класс", "W123", "W124", "GLC", "SLK"} <= set(
+        all_names.update(names)
+    assert all(
+        "LATIN" in unicodedata.name(char, "")
+        for name in all_names
+        for char in name
+        if char.isalpha()
+    )
+    assert all("serisi" not in name.casefold() for name in all_names)
+    assert {"1 Series", "1M", "M1", "3 Series", "M3", "X3", "X3 M"} <= set(catalog.models("БМВ"))
+    assert {"A-Class", "C-Class", "E-Class", "W123", "W124", "W126", "W140", "GLC", "SLK"} <= set(
         catalog.models("Мерседес-Бенц")
     )
-    assert "3 серия" not in catalog.models("Mercedes-Benz")
+    assert "3 Series" not in catalog.models("Mercedes-Benz")
+    assert {"Brera", "Spider", "Alfasud"} <= set(catalog.models("Alfa Romeo"))
+    assert {"Brera and Spider", "Alphasud"}.isdisjoint(catalog.models("Alfa Romeo"))
+    assert "Triber" in catalog.models("Renault")
+    assert "Treiber" not in catalog.models("Renault")
+    assert "X1/9" in catalog.models("Fiat")
+    assert "Şahin" in catalog.models("Tofas")
 
 
 def test_catalog_legacy_names_deduplicate_without_changing_records(records):
@@ -249,14 +285,14 @@ def test_catalog_legacy_names_deduplicate_without_changing_records(records):
     for model in ("3 Serisi (M3)", "3 Series", "3 серия", "Свой BMW 3", "X3M"):
         cars.append((records.save_vehicle({"make": "BMW", "model": model}), model))
     catalog = VehicleCatalog(Records(records.path))
-    assert catalog.models("BMW").count("3 серия") == 1
+    assert catalog.models("BMW").count("3 Series") == 1
     assert catalog.models("BMW").count("X3 M") == 1
-    assert "Свой BMW 3" in catalog.models("BMW")
+    assert "Свой BMW 3" not in catalog.models("BMW")
     assert not any("Serisi" in name for name in catalog.models("BMW"))
     for vehicle_id, model in cars:
         assert Records(records.path).vehicle(vehicle_id)["model"] == model
     records.save_vehicle({"make": "Своя марка", "model": "3 Serisi"})
-    assert catalog.models("Своя марка") == ["3 Serisi"]
+    assert catalog.models("Своя марка") == []
 
 
 def test_model_alias_completion_inserts_display_name_and_preserves_old_card(application, records):
@@ -265,7 +301,12 @@ def test_model_alias_completion_inserts_display_name_and_preserves_old_card(appl
     assert dialog.fields["model"].text() == "3 Serisi (M3)"
     assert dialog.state() == dialog.original
     completer = dialog.model_completer
-    for query, expected in (("3 series", "3 серия"), ("3 serisi", "3 серия"), ("X3M", "X3 M")):
+    for query, expected in (
+        ("3 series", "3 Series"),
+        ("3 serisi", "3 Series"),
+        ("3 серия", "3 Series"),
+        ("X3M", "X3 M"),
+    ):
         completer.setCompletionPrefix(query)
         model = completer.completionModel()
         labels = [model.index(row, 0).data() for row in range(model.rowCount())]
@@ -285,12 +326,13 @@ def test_model_alias_completion_inserts_display_name_and_preserves_old_card(appl
     QTest.mouseClick(
         popup.viewport(), Qt.MouseButton.LeftButton, pos=popup.visualRect(index).center()
     )
-    assert dialog.fields["model"].text() == "3 серия"
+    assert dialog.fields["model"].text() == "3 Series"
     assert records.vehicle(vehicle_id)["model"] == "3 Serisi (M3)"
     dialog.save()
-    assert Records(records.path).vehicle(vehicle_id)["model"] == "3 серия"
+    assert Records(records.path).vehicle(vehicle_id)["model"] == "3 Series"
     second = VehicleDialog(records)
     second.fields["make"].setText("Mercedes")
-    second.model_completer.setCompletionPrefix("c-class")
-    assert second.model_completer.completionModel().index(0, 0).data() == "C-класс"
+    for query in ("c-class", "C-класс", "С-класс", "C-Serisi"):
+        second.model_completer.setCompletionPrefix(query)
+        assert second.model_completer.completionModel().index(0, 0).data() == "C-Class"
     second.done(0)

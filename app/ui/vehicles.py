@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.services.catalog import VehicleCatalog, model_search_text, name_key
+from app.services.catalog import VehicleCatalog, make_search_text, model_search_text, name_key
 from app.services.records import (
     Records,
     RestoreMileageConflict,
@@ -105,17 +105,23 @@ class ContactCompleter(QCompleter):
         return index.data(Qt.ItemDataRole.UserRole + 1) or ""
 
 
-class ModelSuggestions(QStringListModel):
-    make = ""
+class VehicleSuggestions(QStringListModel):
+    def __init__(self, search_text, parent):
+        super().__init__(parent)
+        self.search_text = search_text
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
         if role == Qt.ItemDataRole.UserRole + 1:
-            model = super().data(index, Qt.ItemDataRole.DisplayRole)
-            return model_search_text(self.make, model) if model is not None else ""
+            label = super().data(index, Qt.ItemDataRole.DisplayRole)
+            return self.search_text(label) if label is not None else ""
         return super().data(index, role)
 
 
-class ModelCompleter(QCompleter):
+class VehicleCompleter(QCompleter):
+    def __init__(self, suggestions, parent):
+        super().__init__(suggestions, parent)
+        self.setCompletionRole(Qt.ItemDataRole.UserRole + 1)
+
     def splitPath(self, path):
         return [name_key(path)]
 
@@ -191,11 +197,14 @@ class VehicleDialog(SafeDialog):
 
     def setup_suggestions(self):
         self.catalog = VehicleCatalog(self.records)
-        self.make_completer = QCompleter(self.catalog.makes(), self)
+        self.make_suggestions = VehicleSuggestions(make_search_text, self)
+        self.make_suggestions.setStringList(self.catalog.makes())
+        self.make_completer = VehicleCompleter(self.make_suggestions, self)
         self.fields["make"].setCompleter(self.make_completer)
-        self.model_suggestions = ModelSuggestions(self)
-        self.model_completer = ModelCompleter(self.model_suggestions, self)
-        self.model_completer.setCompletionRole(Qt.ItemDataRole.UserRole + 1)
+        self.model_suggestions = VehicleSuggestions(
+            lambda label: model_search_text(self.fields["make"].text(), label), self
+        )
+        self.model_completer = VehicleCompleter(self.model_suggestions, self)
         self.fields["model"].setCompleter(self.model_completer)
         self.fields["make"].textChanged.connect(self.update_models)
         self.update_models()
@@ -227,8 +236,7 @@ class VehicleDialog(SafeDialog):
         self.fields["model"].setPlaceholderText("Модели выбранной марки или своё название")
 
     def update_models(self, *_):
-        self.model_suggestions.make = self.fields["make"].text()
-        self.model_suggestions.setStringList(self.catalog.models(self.model_suggestions.make))
+        self.model_suggestions.setStringList(self.catalog.models(self.fields["make"].text()))
 
     def select_suggested_contact(self, index):
         contact_id = index.data(Qt.ItemDataRole.UserRole)

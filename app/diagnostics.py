@@ -38,6 +38,7 @@ from app.services.txt_import import TxtImport
 from app.ui.customers import CustomerVehiclePicker
 from app.ui.documents import DocumentDialog, print_pdf
 from app.ui.help import HelpDialog
+from app.ui.vehicles import VehicleDialog
 from app.version import VERSION
 
 MARKER = "AutoService synthetic release check v1"
@@ -253,6 +254,27 @@ def reopen(root, report):
             "Связь клиента и машины",
         )
         check("Golf" in VehicleCatalog(records).models("Volkswagen"), "Справочник внутри EXE")
+        vehicle_form = VehicleDialog(records, parent=window)
+        vehicle_form.make_completer.setCompletionPrefix("бмв")
+        check(
+            vehicle_form.make_completer.completionModel().index(0, 0).data() == "BMW",
+            "Английская марка по русскому вводу",
+        )
+        for make, query, expected in (
+            ("BMW", "3 serisi", "3 Series"),
+            ("Мерседес-Бенц", "С-класс", "C-Class"),
+            ("Renault", "Treiber", "Triber"),
+        ):
+            vehicle_form.fields["make"].setText(make)
+            completer = vehicle_form.model_completer
+            completer.setCompletionPrefix(query)
+            suggestions = completer.completionModel()
+            check(
+                expected
+                in {suggestions.index(row, 0).data() for row in range(suggestions.rowCount())},
+                f"Английская модель {make} {expected}",
+            )
+        vehicle_form.done(0)
         documents = Documents(path)
         content = documents.pdf_content(report["documents"][1])
         check(sha256(content).hexdigest() == report["pdf_sha256"], "Повторный запуск: PDF")

@@ -59,6 +59,23 @@ def make_key(value):
 
 
 @lru_cache(maxsize=1)
+def builtin_makes():
+    return {make_key(make): make for make in builtin_catalog()}
+
+
+def make_search_text(make):
+    key = make_key(make)
+    return "|".join([key, *(alias for alias, brand in ALIASES.items() if brand == key)])
+
+
+def is_suggestion_name(value):
+    """Имена собственные могут содержать латинские буквы с диакритикой."""
+    return "serisi" not in name_key(value) and all(
+        "LATIN" in unicodedata.name(char, "") for char in value if char.isalpha()
+    )
+
+
+@lru_cache(maxsize=1)
 def model_overrides():
     """Точные соответствия; составная строка предлагает несколько вариантов."""
     path = Path(__file__).resolve().parents[1] / "assets" / "car_models.overrides.json"
@@ -81,14 +98,19 @@ def model_names(make, value):
     return model_overrides().get((make_key(make), name_key(value)), (value,))
 
 
+@lru_cache(maxsize=1)
+def model_aliases():
+    result = {}
+    for (brand, alias), targets in model_overrides().items():
+        for model in targets:
+            result.setdefault((brand, model), []).append(alias)
+    return result
+
+
 def model_search_text(make, model):
     """Поиск по прежним подписям без показа дублей в выпадающем списке."""
-    key = make_key(make)
-    aliases = [name_key(model)]
-    for (brand, alias), targets in model_overrides().items():
-        if brand == key and model in targets:
-            aliases.append(alias)
-    return "|".join(aliases)
+    aliases = model_aliases().get((make_key(make), model), ())
+    return "|".join([name_key(model), *aliases])
 
 
 class VehicleCatalog:
@@ -96,33 +118,25 @@ class VehicleCatalog:
         self.records = records
 
     def makes(self):
-        return unique_names(
-            [
-                *builtin_catalog(),
-                "VW",
-                "Фольксваген",
-                "Шкода",
-                "Лада",
-                "ВАЗ",
-                "БМВ",
-                "Ауди",
-                "Тойота",
-                "Рено",
-                *(row["make"] for row in self.records.vehicle_names()),
-            ]
-        )
+        names = builtin_makes()
+        local = [
+            row["make"]
+            for row in self.records.vehicle_names()
+            if make_key(row["make"]) not in names and is_suggestion_name(row["make"])
+        ]
+        return unique_names([*names.values(), *local])
 
     def models(self, make):
         key = make_key(make)
         if not key:
             return []
-        values = [
-            model
-            for brand, models in builtin_catalog().items()
-            if make_key(brand) == key
-            for model in models
-        ]
+        values = list(builtin_catalog().get(builtin_makes().get(key), ()))
         values.extend(
             row["model"] for row in self.records.vehicle_names() if make_key(row["make"]) == key
         )
-        return unique_names(name for value in values for name in model_names(make, value))
+        return unique_names(
+            name
+            for value in values
+            for name in model_names(make, value)
+            if is_suggestion_name(name)
+        )
