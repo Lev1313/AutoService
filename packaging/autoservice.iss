@@ -24,6 +24,7 @@ OutputBaseFilename=AutoService-{#AppVersion}-Windows-x64-Setup
 Compression=lzma2/fast
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile={#BundleDir}\_internal\app\assets\autoservice.ico
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\AutoService.exe
 CloseApplications=yes

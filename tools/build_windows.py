@@ -59,6 +59,8 @@ def build(output: Path, compiler: Path):
             "--noupx",
             "--name",
             "AutoService",
+            "--icon",
+            str(project / "app" / "assets" / "autoservice.ico"),
             "--version-file",
             str(version_file),
             "--distpath",

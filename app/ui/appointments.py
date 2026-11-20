@@ -4,7 +4,9 @@ from collections import defaultdict
 from datetime import datetime
 
 from PySide6.QtCore import QDate, QLocale, Qt, QTime, Signal
+from PySide6.QtGui import QPainter, QPalette
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QComboBox,
     QDateEdit,
     QDialog,
@@ -19,21 +21,25 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QStackedWidget,
+    QStyle,
+    QStyleOptionButton,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from app.services.appointments import ACTIVE_STATUSES, STATUSES, Appointments
-from app.ui.vehicles import ERRORS, RepairDialog, SafeDialog, make_table, plain_label
+from app.ui.vehicles import (
+    ERRORS,
+    RepairDialog,
+    SafeDialog,
+    make_table,
+    plain_label,
+    primary_button,
+    vehicle_label,
+)
 
 ISO = Qt.DateFormat.ISODate
-
-
-def vehicle_label(vehicle):
-    model = " ".join(part for part in (vehicle["make"], vehicle["model"]) if part)
-    identity = vehicle["plate"] or vehicle["vin"]
-    return " · ".join(part for part in (model, identity) if part)
 
 
 class AppointmentDialog(SafeDialog):
@@ -102,7 +108,7 @@ class AppointmentDialog(SafeDialog):
         cancel = QPushButton("Отмена")
         cancel.clicked.connect(self.reject)
         row.addWidget(cancel)
-        save = QPushButton("Сохранить")
+        save = primary_button("Сохранить")
         save.setDefault(True)
         save.clicked.connect(self.save)
         row.addWidget(save)
@@ -167,6 +173,35 @@ class AppointmentDialog(SafeDialog):
             QMessageBox.warning(self, "Не удалось сохранить запись", str(error))
             return
         self.accept()
+
+
+class CalendarVisitButton(QPushButton):
+    def __init__(self, time, name):
+        super().__init__(f"{time} {name}")
+        self.time = time
+        self.name = name
+
+    def paintEvent(self, event):
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        option.text = ""
+        with QPainter(self) as painter:
+            self.style().drawControl(QStyle.ControlElement.CE_PushButton, option, painter, self)
+            painter.setPen(option.palette.color(QPalette.ColorRole.ButtonText))
+            text_rect = self.rect().adjusted(5, 0, -5, 0)
+            alignment = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            original_font = self.font()
+            time_font = self.font()
+            time_font.setBold(True)
+            painter.setFont(time_font)
+            painter.drawText(text_rect, alignment, self.time)
+            text_rect.adjust(painter.fontMetrics().horizontalAdvance(self.time) + 4, 0, 0, 0)
+            if text_rect.width() > 0:
+                painter.setFont(original_font)
+                name = painter.fontMetrics().elidedText(
+                    self.name, Qt.TextElideMode.ElideRight, text_rect.width()
+                )
+                painter.drawText(text_rect, alignment, name)
 
 
 class MonthCalendar(QScrollArea):
@@ -245,15 +280,14 @@ class MonthCalendar(QScrollArea):
             cell.setMinimumHeight(layout.minimumSize().height())
             self.grid.addWidget(cell, offset // 7 + 1, offset % 7)
 
-    def compact_button(self, text, name):
-        button = QPushButton(text)
+    def compact_button(self, button, name):
         button.setObjectName(name)
         button.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         button.setMinimumHeight(button.fontMetrics().height() + 6)
         return button
 
     def date_button(self, text, day):
-        button = self.compact_button(text, "calendarDate")
+        button = self.compact_button(QPushButton(text), "calendarDate")
         button.clicked.connect(lambda: self.day_requested.emit(day))
         return button
 
@@ -261,7 +295,7 @@ class MonthCalendar(QScrollArea):
         time = entry["starts_at"][11:16]
         vehicle = vehicle_label(entry)
         label = entry["plate"] or vehicle or entry["contact_text"]
-        button = self.compact_button(f"{time} {label}", "calendarVisit")
+        button = self.compact_button(CalendarVisitButton(time, label), "calendarVisit")
         button.setProperty("arrived", entry["status"] == "arrived")
         button.setProperty("inactive", entry["status"] not in ACTIVE_STATUSES)
         details = (time, vehicle or label, entry["reason"], STATUSES[entry["status"]])
@@ -283,28 +317,35 @@ class AppointmentsPage(QWidget):
         title.setObjectName("title")
         layout.addWidget(title)
         toolbar = QHBoxLayout()
-        self.mode = QComboBox()
-        self.mode.setAccessibleName("Вид расписания")
-        self.mode.addItems(("День", "Месяц"))
-        toolbar.addWidget(self.mode)
+        self.mode = QButtonGroup(self)
+        self.day_button = QPushButton("День")
+        self.month_button = QPushButton("Месяц")
+        for index, button in enumerate((self.day_button, self.month_button)):
+            button.setObjectName("appointmentView")
+            button.setCheckable(True)
+            self.mode.addButton(button, index)
+            toolbar.addWidget(button)
+        self.day_button.setChecked(True)
         self.day = QDateEdit(QDate.currentDate())
         self.day.setCalendarPopup(True)
         self.day.setDisplayFormat("ddd, dd.MM.yyyy")
         self.day.setAccessibleName("Дата расписания")
         previous = QPushButton("‹")
         previous.setAccessibleName("Назад")
+        previous.setFixedWidth(32)
         previous.clicked.connect(lambda: self.move_period(-1))
         toolbar.addWidget(previous)
         toolbar.addWidget(self.day)
         following = QPushButton("›")
         following.setAccessibleName("Вперёд")
+        following.setFixedWidth(32)
         following.clicked.connect(lambda: self.move_period(1))
         toolbar.addWidget(following)
         today = QPushButton("Сегодня")
         today.clicked.connect(lambda: self.day.setDate(QDate.currentDate()))
         toolbar.addWidget(today)
         toolbar.addStretch()
-        add = QPushButton("Новая запись")
+        add = primary_button("Новая запись")
         add.clicked.connect(lambda: self.edit())
         toolbar.addWidget(add)
         layout.addLayout(toolbar)
@@ -334,21 +375,25 @@ class AppointmentsPage(QWidget):
         self.views.addWidget(self.day_view)
         self.views.addWidget(self.calendar)
         layout.addWidget(self.views, 1)
-        self.mode.currentIndexChanged.connect(self.change_view)
+        self.mode.idToggled.connect(self.change_view)
         self.day.dateChanged.connect(self.refresh)
 
-    def change_view(self, index):
+    def change_view(self, index, checked):
+        if not checked:
+            return
         self.views.setCurrentIndex(index)
         self.day.setDisplayFormat("MMMM yyyy" if index else "ddd, dd.MM.yyyy")
         self.refresh()
 
     def move_period(self, step):
         day = self.day.date()
-        self.day.setDate(day.addMonths(step) if self.mode.currentIndex() else day.addDays(step))
+        self.day.setDate(
+            day.addMonths(step) if self.month_button.isChecked() else day.addDays(step)
+        )
 
     def show_day(self, day):
         self.day.setDate(day)
-        self.mode.setCurrentIndex(0)
+        self.day_button.setChecked(True)
 
     def selected(self):
         index = self.table.currentRow()
@@ -441,6 +486,6 @@ class AppointmentsPage(QWidget):
             row["vehicle_id"],
             repair,
             self,
-            appointment={**row, "vehicle_label": vehicle_label(row)},
+            appointment=row,
         ).exec()
         self.refresh()

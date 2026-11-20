@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QLocale, QLockFile
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtGui import QColor, QIcon, QPalette
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app.database.connection import initialize_database
@@ -21,6 +21,7 @@ def create_application(argv: list[str] | None = None) -> QApplication:
     application.setApplicationName("AutoService")
     application.setApplicationVersion(VERSION)
     application.setOrganizationName("AutoService")
+    application.setWindowIcon(QIcon(str(Path(__file__).parent / "assets" / "autoservice.ico")))
     application.setStyle("Fusion")
     palette = QPalette()
     for role, color in {

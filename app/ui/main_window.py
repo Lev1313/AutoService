@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 
 from PySide6.QtCore import QDateTime, QSettings, Qt
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QStackedWidget,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QVBoxLayout,
     QWidget,
 )
@@ -28,15 +30,16 @@ from app.ui.maintenance import CallsPage
 from app.ui.vehicles import VehiclesPage
 from app.version import VERSION
 
-SECTIONS = ("Автомобили", "Клиенты", "Звонки", "Настройки", "Записи")
+SECTIONS = ("Автомобили", "Клиенты", "Звонки", "Записи", "Настройки")
 LAST_BACKUP_KEY = "last_manual_backup"
 
 STYLESHEET = """
 QWidget { color: #243247; font-family: 'Segoe UI'; font-size: 10pt; }
 QMainWindow, QStackedWidget { background: #f5f7fa; }
 QFrame#sidebar { background: white; border-right: 1px solid #dce3ec; }
-QLabel#brand { font-size: 18pt; font-weight: 700; color: #175cd3; }
+QLabel#brand { font-size: 16pt; font-weight: 700; color: #175cd3; }
 QLabel#title { font-size: 23pt; font-weight: 600; }
+QLabel#repairTitle { font-size: 17pt; font-weight: 600; }
 QLabel#muted { color: #596980; }
 QLabel#badge { color: #175cd3; background: #eaf2ff; padding: 8px; border-radius: 6px; }
 QListWidget { background: transparent; border: none; outline: none; }
@@ -44,6 +47,20 @@ QListWidget::item { padding: 12px 10px; margin: 3px 0; border-radius: 6px; }
 QListWidget::item:selected { background: #eaf2ff; color: #175cd3; font-weight: 600; }
 QListWidget::item:hover:!selected { background: #f0f3f7; }
 QListWidget::item:focus { border: 1px solid #175cd3; }
+QPushButton[primary="true"] {
+    background: #175cd3; color: white; border: 1px solid #175cd3; border-radius: 4px;
+    padding: 4px 10px; font-weight: 600;
+}
+QPushButton[primary="true"]:hover { background: #104eBA; }
+QPushButton[primary="true"]:pressed { background: #0d429f; }
+QPushButton[primary="true"]:focus { border-color: #102950; text-decoration: underline; }
+QPushButton[primary="true"]:disabled { color: #596980; background: #e6ebf2; border-color: #dce3ec; }
+QPushButton#appointmentView {
+    background: white; border: 1px solid #cbd6e5; border-radius: 4px; padding: 3px 10px;
+}
+QPushButton#appointmentView:hover { background: #f0f5fd; }
+QPushButton#appointmentView:checked { background: #eaf2ff; color: #175cd3; font-weight: 600; }
+QPushButton#appointmentView:focus { border-color: #175cd3; }
 QTableWidget { background: white; border: 1px solid #dce3ec;
     border-radius: 6px; gridline-color: #e8edf3; selection-background-color: #eaf2ff;
     selection-color: #243247; alternate-background-color: #f8fafc; }
@@ -59,6 +76,25 @@ def label(text: str, name: str = "", wrap: bool = False) -> QLabel:
     widget.setWordWrap(wrap)
     widget.setTextFormat(Qt.TextFormat.PlainText)
     return widget
+
+
+class NavigationDelegate(QStyledItemDelegate):
+    def sizeHint(self, option, index):
+        size = super().sizeHint(option, index)
+        if index.row() == len(SECTIONS) - 1:
+            size.setHeight(size.height() + 12)
+        return size
+
+    def paint(self, painter, option, index):
+        if index.row() == len(SECTIONS) - 1:
+            option = QStyleOptionViewItem(option)
+            rect = option.rect
+            painter.save()
+            painter.setPen(QColor("#dce3ec"))
+            painter.drawLine(rect.left() + 10, rect.top() + 5, rect.right() - 10, rect.top() + 5)
+            painter.restore()
+            option.rect = rect.adjusted(0, 12, 0, 0)
+        super().paint(painter, option, index)
 
 
 class MainWindow(QMainWindow):
@@ -80,13 +116,20 @@ class MainWindow(QMainWindow):
         sidebar.setFixedWidth(210)
         side_layout = QVBoxLayout(sidebar)
         side_layout.setContentsMargins(18, 25, 18, 18)
-        side_layout.addWidget(label("АвтоСервис", "brand"))
+        brand = QHBoxLayout()
+        brand.setSpacing(8)
+        logo = QLabel()
+        logo.setPixmap(self.windowIcon().pixmap(32, 32))
+        brand.addWidget(logo)
+        brand.addWidget(label("АвтоСервис", "brand"), 1)
+        side_layout.addLayout(brand)
         if demo:
             side_layout.addWidget(label("Демонстрационный режим. Отдельные данные.", "muted", True))
         side_layout.addSpacing(24)
         self.navigation = QListWidget()
         self.navigation.setAccessibleName("Разделы программы")
         self.navigation.addItems(SECTIONS)
+        self.navigation.setItemDelegate(NavigationDelegate(self.navigation))
         side_layout.addWidget(self.navigation)
         self.help_button = QPushButton("Инструкция · F1")
         self.help_button.clicked.connect(self.show_help)

@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 from app.services.documents import Documents, TotalMismatch, normalize_items
 from app.services.receipt_pdf import pdf_bytes, save_pdf
 from app.services.records import amount_text
-from app.ui.vehicles import ERRORS, SafeDialog, plain_label
+from app.ui.vehicles import ERRORS, SafeDialog, plain_label, primary_button
 
 
 def print_pdf(document: QPdfDocument, printer: QPrinter):
@@ -93,7 +93,7 @@ class DocumentSettingsDialog(SafeDialog):
         cancel.clicked.connect(self.reject)
         row.addWidget(cancel)
         row.addStretch()
-        save = QPushButton("Сохранить")
+        save = primary_button("Сохранить")
         save.clicked.connect(self.save)
         row.addWidget(save)
         layout.addLayout(row)

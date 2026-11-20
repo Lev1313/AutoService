@@ -47,8 +47,8 @@ def test_pilot_keyboard_help_and_selection_survive_navigation(application, tmp_p
             "Автомобили",
             "Клиенты",
             "Звонки",
-            "Настройки",
             "Записи",
+            "Настройки",
         ]
         page = window.vehicles_page
         page.refresh()
@@ -61,6 +61,8 @@ def test_pilot_keyboard_help_and_selection_survive_navigation(application, tmp_p
         QTest.keyClick(window, Qt.Key.Key_F, Qt.KeyboardModifier.ControlModifier)
         assert window.customers_page.search.hasFocus()
         QTest.keyClick(window, Qt.Key.Key_4, Qt.KeyboardModifier.ControlModifier)
+        assert window.navigation.currentItem().text() == "Записи"
+        QTest.keyClick(window, Qt.Key.Key_5, Qt.KeyboardModifier.ControlModifier)
         assert window.navigation.currentItem().text() == "Настройки"
         before = Path(window.db_path).read_bytes()
         captured = []

@@ -45,6 +45,18 @@ def plain_label(text: str) -> QLabel:
     return result
 
 
+def primary_button(text: str) -> QPushButton:
+    button = QPushButton(text)
+    button.setProperty("primary", True)
+    return button
+
+
+def vehicle_label(vehicle):
+    model = " ".join(part for part in (vehicle["make"], vehicle["model"]) if part)
+    identity = vehicle["plate"] or vehicle["vin"]
+    return " · ".join(part for part in (model, identity) if part)
+
+
 def make_table(headers: tuple[str, ...]) -> QTableWidget:
     table = QTableWidget(0, len(headers))
     table.setHorizontalHeaderLabels(headers)
@@ -150,7 +162,7 @@ class VehicleDialog(SafeDialog):
         row.addStretch()
         cancel = QPushButton("Отмена")
         cancel.clicked.connect(self.reject)
-        self.save_button = QPushButton("Сохранить")
+        self.save_button = primary_button("Сохранить")
         self.save_button.setDefault(True)
         self.save_button.clicked.connect(self.save)
         row.addWidget(cancel)
@@ -272,10 +284,11 @@ class RepairDialog(SafeDialog):
         self.resize(740, 610)
         self.setMinimumSize(550, 450)
         layout = QVBoxLayout(self)
-        if appointment:
-            layout.addWidget(plain_label(appointment["vehicle_label"]))
-            if appointment["reason"]:
-                layout.addWidget(plain_label(f"Причина визита: {appointment['reason']}"))
+        heading = plain_label(vehicle_label(records.vehicle(vehicle_id)) or "Автомобиль")
+        heading.setObjectName("repairTitle")
+        layout.addWidget(heading)
+        if appointment and appointment["reason"]:
+            layout.addWidget(plain_label(f"Причина визита: {appointment['reason']}"))
         form = QFormLayout()
         self.visit_date = QDateEdit(QDate.currentDate())
         self.visit_date.setCalendarPopup(True)
@@ -339,7 +352,7 @@ class RepairDialog(SafeDialog):
             original_button.clicked.connect(self.open_source)
             row.addWidget(original_button)
         row.addStretch()
-        self.save_button = QPushButton("Сохранить")
+        self.save_button = primary_button("Сохранить")
         self.save_button.clicked.connect(self.save)
         self.save_button.setDefault(True)
         row.addWidget(self.save_button)
@@ -749,7 +762,7 @@ class VehiclesPage(QWidget):
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self.refresh)
         row.addWidget(self.search, 1)
-        self.add_button = QPushButton("Добавить автомобиль")
+        self.add_button = primary_button("Добавить автомобиль")
         self.add_button.clicked.connect(self.add_vehicle)
         row.addWidget(self.add_button)
         import_button = QPushButton("Импорт TXT")

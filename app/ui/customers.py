@@ -15,7 +15,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.ui.vehicles import ERRORS, SafeDialog, VehicleCard, VehicleDialog, make_table, plain_label
+from app.ui.vehicles import (
+    ERRORS,
+    SafeDialog,
+    VehicleCard,
+    VehicleDialog,
+    make_table,
+    plain_label,
+    primary_button,
+)
 
 
 class CustomerDialog(SafeDialog):
@@ -62,7 +70,7 @@ class CustomerDialog(SafeDialog):
         buttons.addStretch()
         cancel = QPushButton("Отмена")
         cancel.clicked.connect(self.reject)
-        self.save_button = QPushButton("Сохранить")
+        self.save_button = primary_button("Сохранить")
         self.save_button.setDefault(True)
         self.save_button.clicked.connect(self.save)
         buttons.addWidget(cancel)
@@ -113,7 +121,7 @@ class CustomerCard(QDialog):
         actions = QHBoxLayout()
         self.edit_button = QPushButton("Изменить клиента")
         self.edit_button.clicked.connect(self.edit)
-        self.add_vehicle_button = QPushButton("Добавить автомобиль")
+        self.add_vehicle_button = primary_button("Добавить автомобиль")
         self.add_vehicle_button.clicked.connect(self.add_vehicle)
         actions.addWidget(self.edit_button)
         actions.addWidget(self.add_vehicle_button)

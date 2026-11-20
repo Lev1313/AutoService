@@ -276,7 +276,8 @@ def reopen(root, report):
             window.navigation.setCurrentRow(index)
             application.processEvents()
             check(window.pages.currentIndex() == index, "Переключение раздела")
-        check(window.navigation.item(4).text() == "Записи", "Доступ к записям")
+        check(window.navigation.item(3).text() == "Записи", "Записи перед настройками")
+        check(not window.windowIcon().pixmap(16, 16).isNull(), "Значок программы")
         window.navigation.setCurrentRow(window.pages.indexOf(window.appointments_page))
         window.appointments_page.day.setDate(QDate(2026, 12, 1))
         check(
@@ -285,7 +286,7 @@ def reopen(root, report):
         )
         QTest.qWait(150)
         check(window.grab().save(str(root / "appointments-window.png")), "Снимок записей")
-        window.appointments_page.mode.setCurrentText("Месяц")
+        window.appointments_page.month_button.click()
         QTest.qWait(150)
         check(window.grab().save(str(root / "appointments-month.png")), "Снимок календаря записей")
         window.navigation.setCurrentRow(window.pages.indexOf(window.calls_page))

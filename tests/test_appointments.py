@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtWidgets import QLabel, QPushButton
 
 from app.bootstrap import create_window
 from app.database.connection import initialize_database
@@ -65,6 +65,7 @@ def test_calendar_row_opens_and_reopens_standard_repair(application, tmp_path, m
             opened.append(dialog.repair.get("id"))
             assert dialog.vehicle_id == vehicle_id
             assert dialog.appointment["reason"] == "Замена масла"
+            assert dialog.findChild(QLabel, "repairTitle").text() == "VW · А123ТЕ"
             if len(opened) == 2:
                 assert dialog.description.toPlainText() == ""
                 dialog.description.setPlainText("Масло заменили")
@@ -91,7 +92,7 @@ def test_calendar_row_opens_and_reopens_standard_repair(application, tmp_path, m
         QTest.keyClick(page.table, Qt.Key.Key_Return)
         assert opened == [None, None, repair_id]
 
-        page.mode.setCurrentText("Месяц")
+        page.month_button.click()
         assert page.views.currentWidget() is page.calendar
         (visit,) = page.calendar.findChildren(QPushButton, "calendarVisit")
         assert "А123ТЕ" in visit.text()
@@ -147,7 +148,7 @@ def test_month_grid_shows_visits_and_opens_full_day(application, tmp_path):
             )
         window.navigation.setCurrentRow(window.pages.indexOf(page))
         page.day.setDate(day.addDays(-1))
-        page.mode.setCurrentText("Месяц")
+        page.month_button.click()
         assert [
             button.text() for button in page.calendar.findChildren(QPushButton, "calendarVisit")
         ] == [
@@ -159,6 +160,7 @@ def test_month_grid_shows_visits_and_opens_full_day(application, tmp_path):
         )
         more.click()
         assert page.views.currentWidget() is page.day_view
+        assert page.day_button.isChecked()
         assert page.day.date() == day
         assert page.table.rowCount() == 3
     finally:
