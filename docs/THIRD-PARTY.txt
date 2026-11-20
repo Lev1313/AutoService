@@ -6,7 +6,7 @@ PySide6, shiboken6 и Qt 6.12.0 — LGPL v3 / GPL / альтернативная
 https://doc.qt.io/qtforpython-6/licenses.html
 Исходный код привязок: https://code.qt.io/cgit/pyside/pyside-setup.git/?h=v6.12.0
 Исходный код Qt: https://download.qt.io/archive/qt/6.12/6.12.0/submodules/
-QtPdf 6.140.0 включает PDFium и другие сторонние компоненты Qt WebEngine:
+PySide6_Pdf 6.12.0.140 включает QtPdf, PDFium и связанные сторонние компоненты.
 https://doc.qt.io/qt-6/qtpdf-licensing.html
 https://doc.qt.io/qt-6/qtwebengine-3rdparty-licenses.html
 Библиотеки Qt поставлены отдельно в _internal/PySide6; совместимые библиотеки
@@ -18,7 +18,8 @@ charset-normalizer 3.5.2 — MIT; https://github.com/jawah/charset_normalizer
 Системные шрифты Arial используются из Windows и не включены в этот пакет.
 PyInstaller 6.22.3 использован для сборки (GPL с исключением для загрузчика).
 https://pyinstaller.org/en/stable/license.html
-Inno Setup 7.1.1 использован для установщика: https://jrsoftware.org/isinfo.php
+Для сборки установщика используется Inno Setup. Рецепт проверялся с версией 7.1.1.
+https://jrsoftware.org/isinfo.php
 
 Материалы разработки и инструкция повторной сборки хранятся в проекте AutoService.
 
