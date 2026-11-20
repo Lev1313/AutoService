@@ -282,11 +282,14 @@ def test_document_dialog_preview_save_history_and_stale_preview_guard(
     assert dialog.pdf.pageCount() == 1, warnings
     assert service.history(repair) == []
     assert not dialog.export_button.isEnabled()
+    assert not dialog.print_button.isEnabled()
+    assert "«Сохранить экземпляр», затем «Печать»" in dialog.message.text()
     dialog.description.setPlainText("Изменённый текст документа")
     assert dialog.content is None
     QTest.mouseClick(dialog.create_button, Qt.MouseButton.LeftButton)
     assert len(service.history(repair)) == 1, warnings
     assert dialog.export_button.isEnabled()
+    assert dialog.print_button.isEnabled()
     assert not dialog.create_button.isEnabled()
     dialog.reject()
     reopened = DocumentDialog(records, repair)
@@ -294,3 +297,21 @@ def test_document_dialog_preview_save_history_and_stale_preview_guard(
     assert reopened.current_document["payload"]["description"] == "Изменённый текст документа"
     assert reopened.pdf.pageCount() == 1
     reopened.reject()
+
+
+def test_print_without_available_printers(application, data, monkeypatch):
+    from app.ui.documents import QPrinterInfo
+
+    records, _, _, repair = data
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args[2]))
+    monkeypatch.setattr(QPrinterInfo, "availablePrinterNames", lambda: [])
+    dialog = DocumentDialog(records, repair)
+    dialog.create()
+    assert dialog.print_button.isEnabled(), warnings
+    dialog.print_document()
+    assert len(warnings) == 1
+    assert "Диспетчер печати" in warnings[0]
+    assert "Сохранить PDF" in warnings[0]
+    assert dialog.export_button.isEnabled()
+    dialog.reject()

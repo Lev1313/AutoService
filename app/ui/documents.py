@@ -7,7 +7,7 @@ from PySide6.QtCore import QBuffer, QIODevice, QRectF, QSize, Qt
 from PySide6.QtGui import QPageSize, QPainter
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPdfWidgets import QPdfView
-from PySide6.QtPrintSupport import QPrintDialog, QPrinter
+from PySide6.QtPrintSupport import QPrintDialog, QPrinter, QPrinterInfo
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -32,6 +32,10 @@ from app.ui.vehicles import ERRORS, SafeDialog, plain_label
 
 
 def print_pdf(document: QPdfDocument, printer: QPrinter):
+    if document.status() != QPdfDocument.Status.Ready or not document.pageCount():
+        raise ValueError("PDF не готов к печати. Откройте сохранённый экземпляр заново.")
+    if not printer.isValid():
+        raise OSError("Выбранный принтер недоступен. Выберите другой принтер.")
     first = max(0, printer.fromPage() - 1)
     last = min(document.pageCount(), printer.toPage() or document.pageCount())
     if first >= last:
@@ -53,9 +57,12 @@ def print_pdf(document: QPdfDocument, printer: QPrinter):
             rectangle = printer.pageLayout().fullRectPixels(printer.resolution())
             painter.drawImage(QRectF(rectangle), image)
     finally:
-        painter.end()
-    if printer.printerState() == QPrinter.PrinterState.Error:
-        raise OSError("Принтер сообщил об ошибке печати.")
+        finished = painter.end()
+    if not finished or printer.printerState() in (
+        QPrinter.PrinterState.Error,
+        QPrinter.PrinterState.Aborted,
+    ):
+        raise OSError("Не удалось завершить отправку задания на печать.")
 
 
 class DocumentSettingsDialog(SafeDialog):
@@ -387,7 +394,10 @@ class DocumentDialog(SafeDialog):
         self.content = None
         self.export_button.setEnabled(False)
         self.print_button.setEnabled(False)
-        self.message.setText("Нажмите «Предпросмотр». Для выдачи сохраните экземпляр документа.")
+        self.message.setText(
+            "Для печати нажмите «Сохранить экземпляр», затем «Печать». "
+            "Проверить квитанцию перед сохранением можно через «Предпросмотр»."
+        )
 
     def load_pdf(self, content):
         self.pdf.close()
@@ -447,7 +457,7 @@ class DocumentDialog(SafeDialog):
             else:
                 self.load_pdf(content)
                 self.message.setText(
-                    "Предпросмотр. Для постоянного номера нажмите «Сохранить экземпляр»."
+                    "Чтобы напечатать квитанцию, нажмите «Сохранить экземпляр», затем «Печать»."
                 )
         except (*ERRORS, RuntimeError) as error:
             QMessageBox.warning(self, "Не удалось подготовить документ", str(error))
@@ -510,6 +520,19 @@ class DocumentDialog(SafeDialog):
     def print_document(self):
         if not self.current_document or not self.content:
             return
+        if not self.pdf.pageCount():
+            QMessageBox.warning(
+                self, "Не удалось напечатать", "Откройте сохранённый экземпляр заново."
+            )
+            return
+        if not QPrinterInfo.availablePrinterNames():
+            QMessageBox.warning(
+                self,
+                "Нет доступных принтеров",
+                "Добавьте принтер в Windows и проверьте службу «Диспетчер печати». "
+                "Квитанцию можно выгрузить кнопкой «Сохранить PDF».",
+            )
+            return
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
         printer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
         printer.setResolution(300)
@@ -519,4 +542,14 @@ class DocumentDialog(SafeDialog):
             try:
                 print_pdf(self.pdf, printer)
             except (OSError, ValueError) as error:
-                QMessageBox.warning(self, "Не удалось напечатать", str(error))
+                QMessageBox.warning(
+                    self,
+                    "Не удалось напечатать",
+                    f"{error}\n\nПринтер: {printer.printerName() or 'не выбран'}. "
+                    "Проверьте подключение, бумагу и очередь печати в Windows. "
+                    "Квитанцию можно выгрузить кнопкой «Сохранить PDF».",
+                )
+            else:
+                self.message.setText(
+                    "Задание отправлено на печать. Если лист не вышел, проверьте очередь в Windows."
+                )
