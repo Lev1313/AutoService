@@ -3,6 +3,7 @@ from datetime import date
 import pytest
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QPushButton
 
 from app.bootstrap import create_window
 from app.database.connection import initialize_database
@@ -89,5 +90,76 @@ def test_calendar_row_opens_and_reopens_standard_repair(application, tmp_path, m
         page.table.setFocus()
         QTest.keyClick(page.table, Qt.Key.Key_Return)
         assert opened == [None, None, repair_id]
+
+        page.mode.setCurrentText("Месяц")
+        assert page.views.currentWidget() is page.calendar
+        (visit,) = page.calendar.findChildren(QPushButton, "calendarVisit")
+        assert "А123ТЕ" in visit.text()
+        visit.click()
+        assert opened == [None, None, repair_id, repair_id]
+    finally:
+        window.close()
+
+
+def test_time_picker_gives_half_hour_slots_and_preserves_old_minutes(application, tmp_path):
+    day = QDate(2026, 11, 21)
+    window = create_window(tmp_path / "test.sqlite3")
+    page = window.appointments_page
+    try:
+        form = AppointmentDialog(window.records, day, page)
+        assert form.arrival_date.calendarPopup()
+        assert [form.arrival_time.itemText(index) for index in range(48)] == [
+            f"{hour:02d}:{minute:02d}" for hour in range(24) for minute in (0, 30)
+        ]
+        form.arrival_time.setCurrentText("10:30")
+        form.arrival_date.setDate(day.addDays(1))
+        assert form.state()["starts_at"] == "2026-11-22T10:30"
+
+        old = {**form.state(), "starts_at": "2026-11-21T15:49", "contact_text": "VW Polo"}
+        page.service.save(old)
+        entry = page.service.for_day(day.toPython())[0]
+        edit = AppointmentDialog(window.records, day, page, appointment=entry)
+        assert edit.arrival_time.currentText() == "15:49"
+        edit.reason.setText("Диагностика")
+        edit.save()
+        saved = page.service.for_day(day.toPython())[0]
+        assert saved["starts_at"] == old["starts_at"]
+        assert saved["reason"] == "Диагностика"
+    finally:
+        window.close()
+
+
+def test_month_grid_shows_visits_and_opens_full_day(application, tmp_path):
+    day = QDate(2026, 12, 2)
+    window = create_window(tmp_path / "test.sqlite3")
+    page = window.appointments_page
+    try:
+        for index in range(3):
+            page.service.save(
+                {
+                    "starts_at": f"2026-12-02T{10 + index}:30",
+                    "duration_minutes": None,
+                    "vehicle_id": None,
+                    "contact_text": f"Машина {index + 1}",
+                    "reason": "ТО",
+                    "status": "scheduled",
+                }
+            )
+        window.navigation.setCurrentRow(window.pages.indexOf(page))
+        page.day.setDate(day.addDays(-1))
+        page.mode.setCurrentText("Месяц")
+        assert [
+            button.text() for button in page.calendar.findChildren(QPushButton, "calendarVisit")
+        ] == [
+            "10:30 Машина 1",
+            "11:30 Машина 2",
+        ]
+        more = next(
+            button for button in page.calendar.findChildren(QPushButton) if button.text() == "Ещё 1"
+        )
+        more.click()
+        assert page.views.currentWidget() is page.day_view
+        assert page.day.date() == day
+        assert page.table.rowCount() == 3
     finally:
         window.close()

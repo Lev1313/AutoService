@@ -18,6 +18,9 @@ class Appointments:
         self.path = path
 
     def for_day(self, day):
+        return self.between(day, day + timedelta(days=1))
+
+    def between(self, first_day, end_day):
         with connect(self.path) as connection:
             return [
                 dict(row)
@@ -28,7 +31,7 @@ class Appointments:
                     LEFT JOIN contacts c ON c.id=v.contact_id
                     WHERE a.starts_at >= ? AND a.starts_at < ?
                     ORDER BY a.starts_at, a.id""",
-                    (day.isoformat(), (day + timedelta(days=1)).isoformat()),
+                    (first_day.isoformat(), end_day.isoformat()),
                 )
             ]
 
