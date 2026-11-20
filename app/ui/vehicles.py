@@ -260,15 +260,22 @@ class VehicleDialog(SafeDialog):
 class RepairDialog(SafeDialog):
     repair_saved = Signal(int)
 
-    def __init__(self, records: Records, vehicle_id: int, repair=None, parent=None):
+    def __init__(
+        self, records: Records, vehicle_id: int, repair=None, parent=None, *, appointment=None
+    ):
         super().__init__(parent)
         self.records = records
         self.vehicle_id = vehicle_id
         self.repair = repair or {}
+        self.appointment = appointment
         self.setWindowTitle("Запись ремонта")
         self.resize(740, 610)
         self.setMinimumSize(550, 450)
         layout = QVBoxLayout(self)
+        if appointment:
+            layout.addWidget(plain_label(appointment["vehicle_label"]))
+            if appointment["reason"]:
+                layout.addWidget(plain_label(f"Причина визита: {appointment['reason']}"))
         form = QFormLayout()
         self.visit_date = QDateEdit(QDate.currentDate())
         self.visit_date.setCalendarPopup(True)
@@ -443,6 +450,7 @@ class RepairDialog(SafeDialog):
                 values,
                 self.repair.get("id"),
                 allow_unverified=allow_unverified,
+                appointment_id=self.appointment["id"] if self.appointment else None,
             )
         except ERRORS as error:
             QMessageBox.warning(self, "Не удалось сохранить ремонт", str(error))

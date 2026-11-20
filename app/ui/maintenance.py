@@ -1,6 +1,6 @@
 """Настраиваемое ТО и список звонков без автоматического распознавания заметок."""
 
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, Signal
 from PySide6.QtGui import QColor, QTextCharFormat
 from PySide6.QtWidgets import (
     QCalendarWidget,
@@ -338,6 +338,8 @@ class CallResultDialog(SafeDialog):
 
 
 class CallsPage(QWidget):
+    appointment_requested = Signal(int, str)
+
     def __init__(self, records, heading="Кому позвонить для приглашения на ТО"):
         super().__init__()
         self.records = records
@@ -407,6 +409,9 @@ class CallsPage(QWidget):
         self.result_button = QPushButton("Результат звонка")
         self.result_button.clicked.connect(self.result)
         row.addWidget(self.result_button)
+        self.appointment_button = QPushButton("Записать на ремонт")
+        self.appointment_button.clicked.connect(self.schedule_appointment)
+        row.addWidget(self.appointment_button)
         row.addStretch()
         layout.addLayout(row)
         self.empty = plain_label(
@@ -497,6 +502,7 @@ class CallsPage(QWidget):
                     self.table.setItem(index, column, QTableWidgetItem(value))
             self.open_button.setEnabled(bool(self.rows))
             self.result_button.setEnabled(bool(self.rows))
+            self.appointment_button.setEnabled(bool(self.rows))
             self.details.clear()
             if self.rows:
                 self.table.selectRow(0)
@@ -541,3 +547,9 @@ class CallsPage(QWidget):
             and CallResultDialog(self.service, self.rows[row], self).exec()
         ):
             self.refresh()
+
+    def schedule_appointment(self):
+        row = self.table.currentRow()
+        if 0 <= row < len(self.rows):
+            task = self.rows[row]
+            self.appointment_requested.emit(task["vehicle_id"], task["title"])

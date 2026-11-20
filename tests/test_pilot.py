@@ -48,6 +48,7 @@ def test_pilot_keyboard_help_and_selection_survive_navigation(application, tmp_p
             "Клиенты",
             "Звонки",
             "Настройки",
+            "Записи",
         ]
         page = window.vehicles_page
         page.refresh()

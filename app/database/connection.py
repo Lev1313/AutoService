@@ -7,7 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 SCHEMA_V2 = (
     """CREATE TABLE contacts (id INTEGER PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '')""",
@@ -110,6 +110,22 @@ SCHEMA_V6 = (
     "ALTER TABLE repairs ADD COLUMN deleted_at TEXT",
 )
 
+SCHEMA_V7 = (
+    """CREATE TABLE appointments (
+    id INTEGER PRIMARY KEY,
+    starts_at TEXT NOT NULL,
+    duration_minutes INTEGER CHECK(duration_minutes BETWEEN 1 AND 1440),
+    vehicle_id INTEGER REFERENCES vehicles(id),
+    contact_text TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'scheduled'
+        CHECK(status IN ('scheduled', 'arrived', 'cancelled', 'no_show')),
+    repair_id INTEGER UNIQUE REFERENCES repairs(id),
+    CHECK(vehicle_id IS NOT NULL OR trim(contact_text) <> ''),
+    CHECK(repair_id IS NULL OR (vehicle_id IS NOT NULL AND status = 'arrived')))""",
+    "CREATE INDEX appointments_starts_at ON appointments(starts_at)",
+)
+
 
 @contextmanager
 def connect(path: Path):
@@ -193,6 +209,9 @@ def initialize_database(path: Path) -> None:
         if version < 6:
             for statement in SCHEMA_V6:
                 connection.execute(statement)
+        if version < 7:
+            for statement in SCHEMA_V7:
+                connection.execute(statement)
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         validate_tables(connection)
 
@@ -223,6 +242,8 @@ def validate_tables(connection):
         "SELECT id, source_id, start_offset, end_offset, original_text, reviewed_json, "
         "repair_id, vehicle_id, semantic_hash FROM import_fragments",
         "SELECT id, created_at, report_json FROM import_batches",
+        "SELECT id, starts_at, duration_minutes, vehicle_id, contact_text, reason, status, "
+        "repair_id FROM appointments",
     ):
         connection.execute(statement)
 

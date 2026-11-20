@@ -21,13 +21,14 @@ from PySide6.QtWidgets import (
 
 from app.database.connection import backup_database, restore_database
 from app.services.records import Records
+from app.ui.appointments import AppointmentsPage
 from app.ui.customers import CustomersPage
 from app.ui.help import HelpDialog
 from app.ui.maintenance import CallsPage
 from app.ui.vehicles import VehiclesPage
 from app.version import VERSION
 
-SECTIONS = ("Автомобили", "Клиенты", "Звонки", "Настройки")
+SECTIONS = ("Автомобили", "Клиенты", "Звонки", "Настройки", "Записи")
 LAST_BACKUP_KEY = "last_manual_backup"
 
 STYLESHEET = """
@@ -101,6 +102,8 @@ class MainWindow(QMainWindow):
         self.vehicles_page = VehiclesPage(self.records)
         self.customers_page = CustomersPage(self.records)
         self.calls_page = CallsPage(self.records, "Звонки")
+        self.appointments_page = AppointmentsPage(self.records)
+        self.calls_page.appointment_requested.connect(self.schedule_from_call)
         for name in SECTIONS:
             if name == "Автомобили":
                 self.pages.addWidget(self.vehicles_page)
@@ -110,6 +113,9 @@ class MainWindow(QMainWindow):
                 continue
             if name == "Звонки":
                 self.pages.addWidget(self.calls_page)
+                continue
+            if name == "Записи":
+                self.pages.addWidget(self.appointments_page)
                 continue
             page = QWidget()
             content = QVBoxLayout(page)
@@ -175,10 +181,17 @@ class MainWindow(QMainWindow):
 
     def refresh_page(self, index):
         page = self.pages.widget(index)
-        if page in (self.vehicles_page, self.customers_page):
+        if page in (
+            self.vehicles_page,
+            self.customers_page,
+            self.calls_page,
+            self.appointments_page,
+        ):
             page.refresh()
-        elif page is self.calls_page:
-            self.calls_page.refresh()
+
+    def schedule_from_call(self, vehicle_id, reason):
+        if self.appointments_page.edit(vehicle_id=vehicle_id, reason=reason):
+            self.navigation.setCurrentRow(self.pages.indexOf(self.appointments_page))
 
     def focus_search(self):
         page = self.pages.currentWidget()

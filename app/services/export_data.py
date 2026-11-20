@@ -18,6 +18,7 @@ TABLES = {
     "contacts": "Клиенты",
     "vehicles": "Автомобили",
     "repairs": "Ремонты",
+    "appointments": "Записи на ремонт",
     "odometer_readings": "Пробеги",
     "vehicle_contacts": "Связи клиентов",
     "maintenance_plans": "ТО",
@@ -53,6 +54,10 @@ LABELS = {
     "document_id": "ID документа",
     "source_id": "ID источника TXT",
     "visit_date": "Дата ремонта",
+    "starts_at": "Дата и время приезда",
+    "duration_minutes": "Плановая длительность, мин",
+    "contact_text": "Контакт / автомобиль со слов клиента",
+    "reason": "Причина визита",
     "description": "Описание",
     "amount_kopecks": "Стоимость, копейки",
     "completed": "Завершён (1/0)",
@@ -118,6 +123,8 @@ GUIDE = (
     "Статусы: open — открыто, contacted — связались, completed — выполнено, "
     "declined — приглашения отключены.\n"
     "Результаты: no_answer — не дозвонились, postponed — перенос, reopen — вернуть в список.\n"
+    "Записи: scheduled — запланирована, arrived — приехал, cancelled — отменена, "
+    "no_show — не приехал.\n"
     "Документы: simple — простая квитанция, detailed — подробная. "
     "Источники: manual/repair — вручную/ремонт, txt/import — TXT, maintenance — ТО.\n"
 )

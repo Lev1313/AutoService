@@ -272,6 +272,8 @@ class Records:
         values: dict,
         repair_id: int | None = None,
         allow_unverified: bool = False,
+        *,
+        appointment_id: int | None = None,
     ) -> int:
         visit_date = values.get("visit_date")
         existing = None
@@ -390,6 +392,15 @@ class Records:
                         "import" if existing and existing["origin"] == "txt" else "repair",
                     ),
                 )
+            if appointment_id is not None:
+                updated = connection.execute(
+                    """UPDATE appointments SET repair_id=?, status='arrived'
+                    WHERE id=? AND vehicle_id=? AND status IN ('scheduled', 'arrived')
+                    AND (repair_id IS NULL OR repair_id=?)""",
+                    (repair_id, appointment_id, vehicle_id, repair_id),
+                )
+                if updated.rowcount != 1:
+                    raise ValueError("Запись изменилась. Закройте ремонт и откройте её снова.")
         return repair_id
 
     def repair_links(self, repair_id):

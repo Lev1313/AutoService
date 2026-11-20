@@ -28,6 +28,7 @@ from app.database.connection import (
     initialize_database,
     restore_database,
 )
+from app.services.appointments import Appointments
 from app.services.catalog import VehicleCatalog
 from app.services.documents import Documents
 from app.services.export_data import export_database
@@ -159,6 +160,21 @@ def prepare(root):
         importer.preview(source_path).fragments[0].imported,
         "Удалённый TXT не импортируется повторно",
     )
+    appointment_id = Appointments(path).save(
+        {
+            "starts_at": "2026-12-01T10:30",
+            "duration_minutes": 60,
+            "vehicle_id": car,
+            "contact_text": "",
+            "reason": "Диагностика подвески",
+            "status": "scheduled",
+        }
+    )
+    appointment_repair = records.save_repair(
+        car,
+        {"visit_date": "2026-12-01", "description": "Подвеску проверили"},
+        appointment_id=appointment_id,
+    )
     export_database(path, root / "txt-export", "txt")
     export_database(path, root / "excel-export", "xlsx")
     check((root / "excel-export" / "AutoService.xlsx").is_file(), "Выгрузка XLSX")
@@ -176,6 +192,7 @@ def prepare(root):
         "customer_id": customer_id,
         "standalone_customer": standalone_customer,
         "repair": repair,
+        "appointment_repair": appointment_repair,
         "carried_repair": carried,
         "carried_document": carried_document["id"],
         "documents": [simple["id"], detailed["id"]],
@@ -259,7 +276,15 @@ def reopen(root, report):
             window.navigation.setCurrentRow(index)
             application.processEvents()
             check(window.pages.currentIndex() == index, "Переключение раздела")
-        check(window.navigation.count() == 4, "Рабочие разделы без Финансов")
+        check(window.navigation.item(4).text() == "Записи", "Доступ к записям")
+        window.navigation.setCurrentRow(window.pages.indexOf(window.appointments_page))
+        window.appointments_page.day.setDate(QDate(2026, 12, 1))
+        check(
+            window.appointments_page.rows[0]["repair_id"] == report["appointment_repair"],
+            "Связь записи и ремонта после восстановления и перезапуска",
+        )
+        QTest.qWait(150)
+        check(window.grab().save(str(root / "appointments-window.png")), "Снимок записей")
         window.navigation.setCurrentRow(window.pages.indexOf(window.calls_page))
         window.calls_page.filter.setCurrentIndex(window.calls_page.filter.findData("all"))
         window.calls_page.view_mode.setCurrentIndex(1)
@@ -290,7 +315,6 @@ def reopen(root, report):
         QTest.qWait(200)
         check(help_dialog.grab().save(str(root / "help-window.png")), "Снимок инструкции")
         help_dialog.close()
-        check(window.navigation.count() == 4, "Четыре рабочих раздела")
 
         buffer = QBuffer()
         buffer.setData(content)
