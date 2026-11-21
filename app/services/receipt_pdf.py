@@ -14,7 +14,6 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
-    KeepTogether,
     LongTable,
     Paragraph,
     SimpleDocTemplate,
@@ -23,7 +22,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from app.services.documents import item_total_label, quantity_text
+from app.services.documents import item_price_total, quantity_text
 from app.services.foltz_pdf import FOLTZ_PAGE, draw_foltz_header
 from app.services.records import amount_text, mileage_text
 
@@ -86,13 +85,21 @@ def build_pdf(document: dict) -> bytes:
     # Только первая страница содержит шапку и увеличенный верхний отступ.
     flow = [Spacer(1, 151 - 16 * mm)]
     if service["name"]:
-        flow.append(paragraph(service["name"], section))
+        flow.append(
+            paragraph(
+                service["name"], ParagraphStyle("ServiceName", parent=section, alignment=TA_RIGHT)
+            )
+        )
     for key in ("address", "phone", "requisites"):
         if service[key]:
-            flow.append(paragraph(service[key], small))
+            flow.append(
+                paragraph(
+                    service[key], ParagraphStyle("ServiceDetail", parent=small, alignment=TA_RIGHT)
+                )
+            )
     flow.append(Spacer(1, 4 * mm))
-    flow.append(paragraph(f"Квитанция {document['number']}", heading))
-    flow.append(paragraph(f"Составлена: {human_date(document['created_at'][:10])}"))
+    flow.append(paragraph(f"Заказ-наряд {document['number']}", heading))
+    flow.append(paragraph(f"Составлен: {human_date(document['created_at'][:10])}"))
     vehicle_name = " ".join(filter(None, (vehicle["make"], vehicle["model"]))) or "Автомобиль"
     details = [
         ("Автомобиль", f"{vehicle_name} · {vehicle['plate'] or 'госномер не указан'}"),
@@ -123,22 +130,50 @@ def build_pdf(document: dict) -> bytes:
         )
     )
     flow.append(info)
-    flow.append(paragraph("Описание ремонта", section))
+    flow.append(paragraph("Что сделали", section))
     # Отдельные абзацы позволяют переносить длинную запись на несколько страниц.
     for line in (data["description"] or "Описание не указано").splitlines():
         flow.append(paragraph(line or " "))
-    if document["kind"] == "detailed":
-        flow.append(paragraph("Работы и запчасти", section))
-        has_prices = data["total_kopecks"] is not None
-        headers = ["Тип", "Наименование", "Кол-во"]
-        widths = [20 * mm, 136 * mm, 18 * mm]
+    if data.get("recommendations"):
+        flow.append(paragraph("Рекомендации", section))
+        for line in data["recommendations"].splitlines():
+            flow.append(paragraph(line or " "))
+
+    def total_line(label, amount):
+        row = Table(
+            [[paragraph(label, section), paragraph(f"{amount_text(amount)} ₽", right)]],
+            colWidths=[140 * mm, 30 * mm],
+            hAlign="LEFT",
+        )
+        row.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                ]
+            )
+        )
+        return row
+
+    for kind, title, subtotal in (
+        ("work", "Работы", "Итого по работам"),
+        ("part", "Запчасти", "Итого по запчастям"),
+    ):
+        items = [item for item in data["items"] if item["kind"] == kind]
+        if not items:
+            continue
+        flow.append(paragraph(title, section))
+        amount = item_price_total(items)
+        has_prices = amount is not None
+        headers = ["Наименование", "Кол-во"]
+        widths = [148 * mm, 22 * mm]
         if has_prices:
             headers.extend(("Цена, ₽", "Сумма, ₽"))
-            widths = [20 * mm, 83 * mm, 18 * mm, 25 * mm, 28 * mm]
+            widths = [93 * mm, 22 * mm, 25 * mm, 30 * mm]
         rows = [[paragraph(value, small) for value in headers]]
-        for item in data["items"]:
+        for item in items:
             row = [
-                paragraph("Работа" if item["kind"] == "work" else "Запчасть", small),
                 paragraph(item["title"]),
                 paragraph(quantity_text(item["quantity_milli"]), right),
             ]
@@ -153,6 +188,7 @@ def build_pdf(document: dict) -> bytes:
         table = LongTable(
             rows,
             colWidths=widths,
+            hAlign="LEFT",
             repeatRows=1,
             splitInRow=1,
         )
@@ -172,11 +208,14 @@ def build_pdf(document: dict) -> bytes:
         )
         flow.append(table)
         if has_prices:
-            total = amount_text(data["total_kopecks"])
-            caption = item_total_label(data["items"])
-            flow.append(
-                KeepTogether([Spacer(1, 7 * mm), paragraph(f"{caption}: {total} ₽", heading)])
-            )
+            if any(item["total_kopecks"] is None for item in items):
+                subtotal += " (по указанным ценам)"
+            flow.append(total_line(subtotal, amount))
+    if data["total_kopecks"] is not None:
+        caption = "Итого по заказ-наряду"
+        if any(item["total_kopecks"] is None for item in data["items"]):
+            caption += " (по указанным ценам)"
+        flow.append(total_line(caption, data["total_kopecks"]))
 
     def footer(canvas, doc):
         canvas.saveState()
@@ -187,7 +226,7 @@ def build_pdf(document: dict) -> bytes:
         canvas.restoreState()
 
     def first_page(canvas, doc):
-        draw_foltz_header(canvas)
+        draw_foltz_header(canvas, align_contacts=True)
         footer(canvas, doc)
 
     template = SimpleDocTemplate(
@@ -197,7 +236,7 @@ def build_pdf(document: dict) -> bytes:
         rightMargin=18 * mm,
         topMargin=16 * mm,
         bottomMargin=20 * mm,
-        title=f"Квитанция {document['number']}",
+        title=f"Заказ-наряд {document['number']}",
         author=service["name"] or "AutoService",
     )
     template.build(flow, onFirstPage=first_page, onLaterPages=footer)

@@ -1,5 +1,6 @@
 """Компактный список и простые формы автомобилей и ремонтов."""
 
+import json
 import sqlite3
 
 from PySide6.QtCore import QDate, QModelIndex, QStringListModel, Qt, Signal
@@ -38,6 +39,12 @@ from app.ui.theme import STATUS_TONE, StatusDelegate
 from app.ui.work_windows import work_windows
 
 ERRORS = (ValueError, OSError, sqlite3.Error)
+
+
+def recommendations_label():
+    label = plain_label("Рекомендации")
+    label.setStyleSheet("color: black; font-weight: bold;")
+    return label
 
 
 def plain_label(text: str) -> QLabel:
@@ -375,10 +382,25 @@ class RepairDialog(SafeDialog):
         self.amount.setPlaceholderText("Пусто — неизвестно; 0 — бесплатно")
         form.addRow("Общая стоимость, ₽", self.amount)
         layout.addLayout(form)
-        layout.addWidget(plain_label("Что сделали, обнаружили, рекомендуете"))
+        layout.addWidget(plain_label("Что сделали"))
         self.description = QPlainTextEdit(self.repair.get("description", ""))
         self.description.setAccessibleName("Описание ремонта")
         layout.addWidget(self.description, 1)
+        layout.addWidget(recommendations_label())
+        self.inherited = self.repair.get("recommendations", "")
+        if not self.repair:
+            self.inherited = records.previous_recommendations(
+                vehicle_id, self.visit_date.date().toString("yyyy-MM-dd")
+            )
+        self.recommendations = QPlainTextEdit(self.inherited)
+        self.recommendations.setAccessibleName("Рекомендации")
+        layout.addWidget(self.recommendations, 1)
+        self.positions = QPlainTextEdit()
+        self.positions.setReadOnly(True)
+        self.positions.setAccessibleName("Позиции заказ-наряда")
+        self.positions.setMaximumHeight(80)
+        layout.addWidget(self.positions)
+        self.show_positions(self.repair.get("document_items", "[]"))
         self.save_notice = plain_label("")
         self.save_notice.hide()
         layout.addWidget(self.save_notice)
@@ -407,6 +429,18 @@ class RepairDialog(SafeDialog):
         layout.addLayout(row)
         self.prepare_guard()
 
+    def show_positions(self, raw_items):
+        lines = []
+        for item in json.loads(raw_items):
+            kind = "Запчасть" if item.get("kind") == "part" else "Работа"
+            price = item.get("price")
+            price_text = f" × {price} ₽" if price not in ("", None) else ""
+            lines.append(
+                f"{kind} · {item.get('title', '')} · {item.get('quantity', '')}{price_text}"
+            )
+        self.positions.setPlainText("\n".join(lines))
+        self.positions.setVisible(bool(lines))
+
     def show_carried(self):
         if self.carried:
             self.mileage.setText(f"{self.carried[0]} ?")
@@ -425,6 +459,11 @@ class RepairDialog(SafeDialog):
         self.show_carried()
 
     def date_changed(self, *_):
+        if not self.repair and not self.recommendations.document().isModified():
+            self.inherited = self.records.previous_recommendations(
+                self.vehicle_id, self.visit_date.date().toString("yyyy-MM-dd")
+            )
+            self.recommendations.setPlainText(self.inherited)
         if not self.measured.isChecked():
             self.suggest_mileage()
 
@@ -459,6 +498,7 @@ class RepairDialog(SafeDialog):
             "carried_on": self.carried[1] if self.carried else None,
             "amount": self.amount.text(),
             "description": self.description.toPlainText(),
+            "recommendations": self.recommendations.toPlainText(),
         }
         if self.repair.get("origin") == "txt":
             values["mileage_verified"] = self.mileage_verified.isChecked()
@@ -713,6 +753,11 @@ class VehicleCard(QDialog):
                 else ""
             )
             + (selected["description"] if selected else "")
+            + (
+                "\n\nРекомендации\n" + selected["recommendations"]
+                if selected and selected["recommendations"]
+                else ""
+            )
         )
 
     def open_source(self):
@@ -743,7 +788,7 @@ class VehicleCard(QDialog):
                 text += (
                     "Убрать ремонт из истории? Его можно восстановить. "
                     "Замер этого ремонта перестанет определять текущий пробег.\n"
-                    f"Сохранены: квитанции — {links['documents']}, TXT — {links['sources']}.\n"
+                    f"Сохранены: документы — {links['documents']}, TXT — {links['sources']}.\n"
                 )
                 if links["maintenance"]:
                     text += (
@@ -864,9 +909,34 @@ def open_repair_window(records, vehicle_id, owner, repair=None, *, appointment=N
 def open_document_window(records, repair_id, owner):
     from app.ui.documents import DocumentDialog
 
-    return work_windows(owner).open(
-        (DocumentDialog, repair_id), lambda: DocumentDialog(records, repair_id)
-    )
+    workspace = work_windows(owner)
+
+    def create():
+        dialog = DocumentDialog(records, repair_id)
+
+        def saved():
+            repair = dialog.source_repair()
+            editor = workspace.find((RepairDialog, repair_id))
+            if editor:
+                for field, widget, new_value in (
+                    ("amount", editor.amount, amount_text(repair["amount_kopecks"])),
+                    ("description", editor.description, repair["description"]),
+                    ("recommendations", editor.recommendations, repair["recommendations"]),
+                ):
+                    if editor.state()[field] == editor.original[field]:
+                        if field == "amount":
+                            widget.setText(new_value)
+                        else:
+                            widget.setPlainText(new_value)
+                    editor.original[field] = new_value
+                editor.show_positions(repair["document_items"])
+                editor.repair.update(repair)
+            workspace.repair_saved.emit(repair["vehicle_id"], repair_id)
+
+        dialog.repair_updated.connect(saved)
+        return dialog
+
+    return workspace.open((DocumentDialog, repair_id), create)
 
 
 class VehiclesPage(QWidget):

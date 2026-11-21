@@ -23,6 +23,8 @@ def test_v7_lowercases_saved_plates_after_creating_backup(tmp_path):
     path = tmp_path / "test.sqlite3"
     initialize_database(path)
     with sqlite3.connect(path) as connection:
+        connection.execute("ALTER TABLE repairs DROP COLUMN recommendations")
+        connection.execute("ALTER TABLE repairs DROP COLUMN document_items")
         connection.execute("PRAGMA user_version = 7")
         connection.execute("INSERT INTO vehicles(plate,vin,archived) VALUES ('А123Bc98','VIN',1)")
 
@@ -44,6 +46,8 @@ def test_v8_uppercases_vin_after_creating_backup(tmp_path):
     path = tmp_path / "test.sqlite3"
     initialize_database(path)
     with sqlite3.connect(path) as connection:
+        connection.execute("ALTER TABLE repairs DROP COLUMN recommendations")
+        connection.execute("ALTER TABLE repairs DROP COLUMN document_items")
         connection.execute("PRAGMA user_version = 8")
         connection.execute("INSERT INTO vehicles(vin,archived) VALUES ('wvwzzz1kzaw000002',1)")
     initialize_database(path)

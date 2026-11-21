@@ -106,14 +106,45 @@ class Documents:
             ).fetchone()
         return json.loads(row[0]) if row else None
 
-    def save_draft(self, repair_id, values):
+    @staticmethod
+    def update_repair(connection, repair_id, values, normalized):
+        connection.execute(
+            """UPDATE repairs SET description=COALESCE(?,description),
+            recommendations=COALESCE(?,recommendations), document_items=? WHERE id=?""",
+            (
+                values.get("description"),
+                values.get("recommendations"),
+                json.dumps(values.get("items") or [], ensure_ascii=False),
+                repair_id,
+            ),
+        )
+        if normalized and all(item["total_kopecks"] is not None for item in normalized):
+            connection.execute(
+                "UPDATE repairs SET amount_kopecks=? WHERE id=?",
+                (item_price_total(normalized), repair_id),
+            )
+
+    @staticmethod
+    def check_source(repair, expected):
+        if expected and any(
+            repair[field] != expected[field]
+            for field in ("description", "recommendations", "document_items", "amount_kopecks")
+        ):
+            raise ValueError("Ремонт изменён в другом окне. Откройте документ заново.")
+
+    def save_draft(self, repair_id, values, *, expected=None):
         # Черновик допускает незаполненные поля; документ проверяется отдельно.
         with connect(self.path) as connection:
-            row = connection.execute(
-                "SELECT deleted_at FROM repairs WHERE id=?", (repair_id,)
-            ).fetchone()
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM repairs WHERE id=?", (repair_id,)).fetchone()
             if row is None or row["deleted_at"]:
                 raise ValueError("Ремонт не найден или удалён. Сначала восстановите его.")
+            self.check_source(row, expected)
+            try:
+                normalized = normalize_items(values.get("items") or [])
+            except ValueError:
+                normalized = []
+            self.update_repair(connection, repair_id, values, normalized)
             connection.execute(
                 "INSERT INTO document_drafts(repair_id,payload) VALUES (?,?) "
                 "ON CONFLICT(repair_id) DO UPDATE SET payload=excluded.payload",
@@ -130,8 +161,9 @@ class Documents:
         preview=False,
         *,
         consume_draft=False,
+        expected=None,
         layout="receipt",
-        recommendations="",
+        recommendations=None,
     ):
         if kind not in ("simple", "detailed"):
             raise ValueError("Выберите формат квитанции.")
@@ -152,6 +184,7 @@ class Documents:
                 )
             if repair is None:
                 raise ValueError("Сначала сохраните ремонт.")
+            self.check_source(repair, expected)
             vehicle = connection.execute(
                 """SELECT v.*, c.name AS contact_name, c.phone FROM vehicles v
                 LEFT JOIN contacts c ON c.id=v.contact_id WHERE v.id=?""",
@@ -160,6 +193,7 @@ class Documents:
             total = repair["amount_kopecks"] if kind == "simple" else item_price_total(normalized)
             mismatch = (
                 kind == "detailed"
+                and not consume_draft
                 and all(item["unit_price_kopecks"] is not None for item in normalized)
                 and repair["amount_kopecks"] is not None
                 and total != repair["amount_kopecks"]
@@ -169,11 +203,28 @@ class Documents:
                     "Итог позиций отличается от стоимости в записи ремонта. "
                     "Использовать в документе сумму позиций? Запись ремонта останется прежней."
                 )
+            repair = dict(repair)
+            if consume_draft and not preview:
+                self.update_repair(
+                    connection,
+                    repair_id,
+                    {
+                        "description": description,
+                        "recommendations": recommendations,
+                        "items": items,
+                    },
+                    normalized,
+                )
+                repair.update(
+                    connection.execute("SELECT * FROM repairs WHERE id=?", (repair_id,)).fetchone()
+                )
             stored_settings = dict(connection.execute("SELECT key,value FROM document_settings"))
             payload = {
                 "schema": 1,
                 "layout": layout,
-                "recommendations": str(recommendations),
+                "recommendations": repair["recommendations"]
+                if recommendations is None
+                else recommendations,
                 "repair": dict(repair),
                 "vehicle": dict(vehicle),
                 "service": {key: stored_settings.get(key, "") for key in SETTINGS},
@@ -196,7 +247,7 @@ class Documents:
                 "VALUES (?,?,?,?,?)",
                 (uuid4().hex, repair_id, created, kind, json.dumps(payload, ensure_ascii=False)),
             ).lastrowid
-            number = f"{'СЛ' if layout == 'service_sheet' else 'КВ'}-{document_id:06d}"
+            number = f"{'СЛ' if layout == 'service_sheet' else 'ЗН'}-{document_id:06d}"
             connection.execute(
                 "UPDATE documents SET number=? WHERE id=?",
                 (number, document_id),

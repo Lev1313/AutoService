@@ -76,7 +76,7 @@ def test_sheet_fields_no_prices_and_immutable_snapshot(application, tmp_path):
         == "Учебная рекомендация"
     )
     receipt = service.create(repair)
-    assert receipt["number"] == "КВ-000002"
+    assert receipt["number"] == "ЗН-000002"
 
 
 def test_both_pdf_formats_share_original_full_header(application, tmp_path):
@@ -92,7 +92,10 @@ def test_both_pdf_formats_share_original_full_header(application, tmp_path):
         pdf.close()
         buffer.close()
 
-    assert headers[0] == headers[1]
+    assert headers[0].copy(0, 0, 480, bounds.height()) == headers[1].copy(
+        0, 0, 480, bounds.height()
+    )
+    assert headers[0] != headers[1]
     # Светлые и тёмные участки есть и слева с рисунком, и справа с контактами.
     for start, end in ((0, 480), (710, bounds.width())):
         assert any(
@@ -182,9 +185,11 @@ def test_document_prices_are_optional_and_survive_draft_and_issue(application, t
     assert reopened.kind.currentData() == layout
     assert reopened.item_tables["work"].item(0, 2).text() == ""
     text = reopened.pdf.getAllText(0).text()
-    assert text.index("Фильтр <тест>") < text.index("Замена фильтра")
+    assert (text.index("Фильтр <тест>") < text.index("Замена фильтра")) == (
+        layout == "service_sheet"
+    )
     assert "100,01" in text and "200,02" in text
-    assert "Итого по указанным ценам" in text
+    assert "по указанным ценам" in text
     assert "Получение оплаты" not in text
     assert reopened.create()
     original = reopened.content

@@ -1,5 +1,6 @@
 """Автомобили, контакты и ремонты; суммы — целые копейки."""
 
+import json
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -293,6 +294,15 @@ class Records:
             for row in rows
         )
 
+    def previous_recommendations(self, vehicle_id, visit_date):
+        with connect(self.path) as connection:
+            row = connection.execute(
+                """SELECT recommendations FROM repairs WHERE vehicle_id=? AND deleted_at IS NULL
+                AND visit_date<=? ORDER BY visit_date DESC,id DESC LIMIT 1""",
+                (vehicle_id, visit_date),
+            ).fetchone()
+        return row[0] if row else ""
+
     def save_repair(
         self,
         vehicle_id: int,
@@ -375,7 +385,15 @@ class Records:
             ).fetchone()
             if exists is None:
                 raise ValueError("Автомобиль не найден.")
+            recommendations = values.get("recommendations")
+            if recommendations is None:
+                recommendations = (
+                    existing["recommendations"]
+                    if existing
+                    else self.previous_recommendations(vehicle_id, visit_date)
+                )
             parameters = (
+                recommendations,
                 visit_date,
                 str(values.get("description", "")),
                 amount,
@@ -383,14 +401,15 @@ class Records:
             )
             if repair_id is None:
                 repair_id = connection.execute(
-                    """INSERT INTO repairs(visit_date, description, amount_kopecks,
-                    completed, vehicle_id) VALUES (?, ?, ?, ?, ?)""",
+                    """INSERT INTO repairs(recommendations, visit_date, description, amount_kopecks,
+                    completed, vehicle_id) VALUES (?, ?, ?, ?, ?, ?)""",
                     (*parameters, vehicle_id),
                 ).lastrowid
             else:
                 cursor = connection.execute(
-                    """UPDATE repairs SET visit_date=?, description=?, amount_kopecks=?,
-                    completed=?, undated_km=?, state_known=? WHERE id=? AND vehicle_id=?""",
+                    """UPDATE repairs SET recommendations=?, visit_date=?, description=?,
+                    amount_kopecks=?, completed=?, undated_km=?, state_known=?
+                    WHERE id=? AND vehicle_id=?""",
                     (
                         *parameters,
                         km if visit_date is None else None,
@@ -401,6 +420,19 @@ class Records:
                 )
                 if cursor.rowcount != 1:
                     raise ValueError("Ремонт не найден у этого автомобиля.")
+            if existing:
+                draft = connection.execute(
+                    "SELECT payload FROM document_drafts WHERE repair_id=?", (repair_id,)
+                ).fetchone()
+                if draft:
+                    payload = json.loads(draft[0])
+                    for key in ("description", "recommendations"):
+                        if key in values and values[key] != existing[key]:
+                            payload[key] = values[key]
+                    connection.execute(
+                        "UPDATE document_drafts SET payload=? WHERE repair_id=?",
+                        (json.dumps(payload, ensure_ascii=False), repair_id),
+                    )
             connection.execute(
                 "UPDATE repairs SET carried_km=?,carried_on=? WHERE id=?",
                 (carried_km, carried_on, repair_id),

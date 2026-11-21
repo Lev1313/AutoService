@@ -221,7 +221,7 @@ class MainWindow(QMainWindow):
         )
 
         documents = self.settings_group(content, "Документы и экспорт")
-        receipts = QPushButton("Реквизиты для квитанций")
+        receipts = QPushButton("Реквизиты для документов")
         receipts.clicked.connect(self.document_settings)
         export = QPushButton("Экспорт базы в TXT / Excel")
         export.clicked.connect(self.export_data)
