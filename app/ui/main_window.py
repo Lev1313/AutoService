@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -32,6 +33,7 @@ from app.ui.help import HelpDialog
 from app.ui.maintenance import CallsPage
 from app.ui.theme import THEME_KEY, apply_theme
 from app.ui.vehicles import VehiclesPage, primary_button
+from app.ui.work_windows import work_windows
 from app.version import VERSION
 
 SECTIONS = ("Автомобили", "Клиенты", "Звонки", "Записи", "Настройки")
@@ -71,6 +73,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("АвтоСервис — учёт автомобилей и ремонтов")
         self.resize(1100, 720)
         self.setMinimumSize(800, 540)
+        self.workspace = work_windows(self)
         self.db_path = db_path
         self.backup_preferences = QSettings(
             str(db_path.with_suffix(".ini")), QSettings.Format.IniFormat, self
@@ -101,6 +104,11 @@ class MainWindow(QMainWindow):
         self.navigation.addItems(SECTIONS)
         self.navigation.setItemDelegate(NavigationDelegate(self.navigation))
         side_layout.addWidget(self.navigation)
+        self.window_menu = QMenu(self)
+        self.window_menu.aboutToShow.connect(self.list_work_windows)
+        windows_button = QPushButton("Открытые окна")
+        windows_button.setMenu(self.window_menu)
+        side_layout.addWidget(windows_button)
         self.help_button = QPushButton("Инструкция · F1")
         self.help_button.clicked.connect(self.show_help)
         side_layout.addWidget(self.help_button)
@@ -123,6 +131,9 @@ class MainWindow(QMainWindow):
             self.pages.addWidget(page)
         layout.addWidget(self.pages, 1)
         self.setCentralWidget(root)
+        self.workspace.customer_saved.connect(self.refresh_current_page)
+        self.workspace.vehicle_saved.connect(self.refresh_current_page)
+        self.workspace.repair_saved.connect(self.refresh_current_page)
         self.navigation.currentRowChanged.connect(self.pages.setCurrentIndex)
         self.navigation.currentRowChanged.connect(self.refresh_page)
         self.navigation.setCurrentRow(0)
@@ -137,6 +148,25 @@ class MainWindow(QMainWindow):
         search_shortcut.activated.connect(self.focus_search)
         help_shortcut = QShortcut(QKeySequence("F1"), self)
         help_shortcut.activated.connect(self.show_help)
+
+    def list_work_windows(self):
+        self.window_menu.clear()
+        for dialog in self.workspace.dialogs:
+            action = self.window_menu.addAction(dialog.windowTitle())
+            action.triggered.connect(
+                lambda checked=False, window=dialog: self.workspace.activate(window)
+            )
+        if not self.workspace.dialogs:
+            self.window_menu.addAction("Нет открытых рабочих окон").setEnabled(False)
+
+    def closeEvent(self, event):
+        if self.workspace.close_all():
+            super().closeEvent(event)
+        else:
+            event.ignore()
+
+    def refresh_current_page(self, *_):
+        self.refresh_page(self.pages.currentIndex())
 
     def settings_page(self, theme):
         scroll = QScrollArea()
@@ -315,12 +345,15 @@ class MainWindow(QMainWindow):
             != QMessageBox.StandardButton.Yes
         ):
             return
+        if not self.workspace.close_all():
+            return
         try:
             safety_copy = restore_database(self.db_path, Path(filename))
         except (OSError, ValueError, RuntimeError) as error:
             QMessageBox.warning(self, "Не удалось восстановить данные", str(error))
             return
         self.vehicles_page.refresh()
+        self.refresh_current_page()
         QMessageBox.information(
             self, "Данные восстановлены", f"Предыдущие данные сохранены здесь:\n{safety_copy}"
         )

@@ -318,7 +318,13 @@ class TxtImport:
             ).lastrowid
         vehicle_id = connection.execute(
             "INSERT INTO vehicles(make,model,plate,vin,contact_id) VALUES (?,?,?,?,?)",
-            (values["make"], values["model"], values["plate"].lower(), values["vin"], contact_id),
+            (
+                values["make"],
+                values["model"],
+                values["plate"].lower(),
+                values["vin"].upper(),
+                contact_id,
+            ),
         ).lastrowid
         connection.execute(
             "INSERT INTO vehicle_contacts(vehicle_id,contact_id,changed_at) VALUES (?,?,?)",

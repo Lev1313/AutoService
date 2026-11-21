@@ -27,7 +27,7 @@ from app.ui.vehicles import RepairDialog
 
 TEXT = (
     "Марка: Тестовая\r\nМодель: Демо\r\nГосномер: А123ВВ10\r\n"
-    "Контакт: Вымышленный\r\nТелефон: 000-000\r\n"
+    "VIN: wvwzzz1kzaw000002\r\nКонтакт: Вымышленный\r\nТелефон: 000-000\r\n"
     "10.01.2026\r\nПробег: 100 000 км\r\nИтого: 1500,50 руб.\r\n"
     "Рекомендовано заменить масло. Оплачено неизвестно.\r\n"
     "20.03.2026\r\nПробег: 105000\r\nТестовая запись без стоимости.\r\n"
@@ -156,6 +156,7 @@ def test_preview_is_read_only_and_commit_preserves_sources_and_unknowns(data):
     assert len(result["imported"]) == 2 and result["backup"]
     assert len(records.vehicles()) == 1
     assert records.vehicles()[0]["plate"] == "а123вв10"
+    assert records.vehicles()[0]["vin"] == "WVWZZZ1KZAW000002"
     car = records.vehicles()[0]["id"]
     repairs = records.repairs(car)
     assert len(repairs) == 2

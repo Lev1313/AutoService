@@ -43,7 +43,7 @@ def test_calendar_overlap_and_repair_link_are_independent_of_edits(tmp_path):
     assert (row["id"], row["status"], row["repair_id"]) == (entry, "arrived", repair_id)
 
 
-def test_calendar_row_opens_and_reopens_standard_repair(application, tmp_path, monkeypatch):
+def test_calendar_row_opens_and_reopens_standard_repair(application, tmp_path):
     path = tmp_path / "test.sqlite3"
     window = create_window(path)
     try:
@@ -59,29 +59,21 @@ def test_calendar_row_opens_and_reopens_standard_repair(application, tmp_path, m
         form.save()
         page.refresh()
         assert page.table.rowCount() == 1
-        opened = []
-
-        def interact(dialog):
-            opened.append(dialog.repair.get("id"))
-            assert dialog.vehicle_id == vehicle_id
-            assert dialog.appointment["reason"] == "Замена масла"
-            assert dialog.findChild(QLabel, "repairTitle").text() == "VW · а123те"
-            if len(opened) == 2:
-                assert dialog.description.toPlainText() == ""
-                dialog.description.setPlainText("Масло заменили")
-                assert dialog.save()
-            if len(opened) == 3:
-                assert dialog.description.toPlainText() == "Масло заменили"
-
-        monkeypatch.setattr(RepairDialog, "exec", interact)
         cell = page.table.visualItemRect(page.table.item(0, 0)).center()
         QTest.mouseClick(page.table.viewport(), Qt.MouseButton.LeftButton, pos=cell)
         QTest.mouseDClick(page.table.viewport(), Qt.MouseButton.LeftButton, pos=cell)
-        assert opened == [None]
+        editor = window.workspace.find((RepairDialog, "appointment", page.rows[0]["id"]))
+        assert editor.isVisible() and not editor.isModal()
+        assert editor.vehicle_id == vehicle_id
+        assert editor.appointment["reason"] == "Замена масла"
+        assert editor.findChild(QLabel, "repairTitle").text() == "VW · а123те"
         assert page.rows[0]["status"] == "scheduled"
         assert window.records.repairs(vehicle_id) == []
 
         page.repair_button.click()
+        assert list(window.workspace.dialogs) == [editor]
+        editor.description.setPlainText("Масло заменили")
+        assert editor.save(close=False)
         repair_id = page.rows[0]["repair_id"]
         assert repair_id is not None
         assert page.rows[0]["status"] == "arrived"
@@ -90,14 +82,17 @@ def test_calendar_row_opens_and_reopens_standard_repair(application, tmp_path, m
 
         page.table.setFocus()
         QTest.keyClick(page.table, Qt.Key.Key_Return)
-        assert opened == [None, None, repair_id]
+        assert window.workspace.find((RepairDialog, repair_id)) is editor
+        editor.close()
 
         page.month_button.click()
         assert page.views.currentWidget() is page.calendar
         (visit,) = page.calendar.findChildren(QPushButton, "calendarVisit")
         assert "а123те" in visit.text()
         visit.click()
-        assert opened == [None, None, repair_id, repair_id]
+        reopened = window.workspace.find((RepairDialog, repair_id))
+        assert reopened is not editor
+        assert reopened.description.toPlainText() == "Масло заменили"
     finally:
         window.close()
 

@@ -19,7 +19,7 @@ def setup_repair(tmp_path):
             "make": "Тестовая марка",
             "model": "Пример",
             "plate": "ТЕСТ 001",
-            "vin": "TESTVIN00000000001",
+            "vin": "testvin00000000001",
         }
     )
     repair = records.save_repair(
@@ -57,7 +57,7 @@ def test_sheet_fields_no_prices_and_immutable_snapshot(application, tmp_path):
     text = pdf.getAllText(0).text()
     for value in (
         "тест 001",
-        "testvin00000000001",
+        "TESTVIN00000000001",
         "21.11.26",
         "123456км",
         "<скобки>",
@@ -87,6 +87,7 @@ def test_both_pdf_formats_share_original_full_header(application, tmp_path):
     for layout in ("receipt", "service_sheet"):
         preview = service.create(repair, layout=layout, preview=True)
         pdf, buffer = open_pdf(pdf_bytes(preview))
+        assert "TESTVIN00000000001" in pdf.getAllText(0).text()
         headers.append(pdf.render(0, size).copy(bounds))
         pdf.close()
         buffer.close()

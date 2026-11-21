@@ -26,7 +26,7 @@ def test_search_edit_and_reopen_preserve_car_history(records):
             "make": "ШКОДА",
             "model": "Октавия",
             "plate": "А 123 ВВ 10",
-            "vin": "TESTVIN",
+            "vin": "testVin",
             "contact_name": "Тестовый контакт",
             "phone": "+7 (000) 123-45-67",
         }

@@ -103,7 +103,7 @@ def build_pdf(document: dict) -> bytes:
         ("Дата ремонта", human_date(repair["visit_date"])),
     ]
     if vehicle["vin"]:
-        details.append(("VIN", vehicle["vin"]))
+        details.append(("VIN", vehicle["vin"].upper()))
     if repair["km"] is not None or repair.get("carried_km") is not None:
         details.append(("Пробег, км", mileage_text(repair)))
         if repair.get("carried_km") is not None:

@@ -18,13 +18,14 @@ from PySide6.QtWidgets import (
 from app.ui.vehicles import (
     ERRORS,
     SafeDialog,
-    VehicleCard,
-    VehicleDialog,
     make_table,
+    open_vehicle_card,
+    open_vehicle_editor,
     plain_label,
     primary_button,
     vehicle_label,
 )
+from app.ui.work_windows import work_windows
 
 
 class CustomerDialog(SafeDialog):
@@ -215,9 +216,11 @@ class CustomerVehiclePicker(QDialog):
 
 
 class CustomerCard(QDialog):
-    def __init__(self, records, contact_id, parent=None):
+    def __init__(self, records, contact_id, parent=None, *, workspace=None):
         super().__init__(parent)
         self.records, self.contact_id = records, contact_id
+        self._work_windows = workspace or work_windows(self)
+        self._work_windows.vehicle_saved.connect(self.refresh_vehicle)
         self.setWindowTitle("Клиент")
         self.resize(850, 560)
         layout = QVBoxLayout(self)
@@ -258,6 +261,7 @@ class CustomerCard(QDialog):
     def refresh(self, vehicle_id=None):
         contact = self.records.contact(self.contact_id)
         self.heading.setText(contact["name"] or "Клиент без имени")
+        self.setWindowTitle(f"Клиент · {self.heading.text()}")
         self.phone.setText(contact["phone"] or "Телефон не указан")
         self.rows = self.records.contact_vehicles(self.contact_id)
         self.table.setRowCount(len(self.rows))
@@ -282,25 +286,35 @@ class CustomerCard(QDialog):
     def edit(self):
         if CustomerDialog(self.records, self.contact_id, self).exec():
             self.refresh()
+            self._work_windows.customer_saved.emit()
+            for vehicle in self.rows:
+                self._work_windows.vehicle_saved.emit(vehicle["id"])
+
+    def refresh_vehicle(self, vehicle_id):
+        vehicle = self.records.vehicle(vehicle_id)
+        if vehicle["contact_id"] == self.contact_id or any(
+            row["id"] == vehicle_id for row in self.rows
+        ):
+            self.refresh(vehicle_id)
 
     def add_vehicle(self):
         picker = CustomerVehiclePicker(self.records, self.contact_id, self)
         if picker.exec() != QDialog.DialogCode.Accepted:
             return
         if not picker.create_new:
-            self.refresh(picker.vehicle_id)
+            self._work_windows.vehicle_saved.emit(picker.vehicle_id)
             return
-        dialog = VehicleDialog(self.records, parent=self, contact_id=self.contact_id)
-        if dialog.exec():
-            self.refresh()
-            VehicleCard(self.records, dialog.vehicle_id, self).exec()
-            self.refresh()
+        return open_vehicle_editor(
+            self.records,
+            self,
+            contact_id=self.contact_id,
+            after_create=lambda vehicle_id: open_vehicle_card(self.records, vehicle_id, self),
+        )
 
     def open_vehicle(self):
         row = self.table.currentRow()
         if 0 <= row < len(self.rows):
-            VehicleCard(self.records, self.rows[row]["id"], self).exec()
-            self.refresh()
+            return open_vehicle_card(self.records, self.rows[row]["id"], self)
 
 
 class CustomersPage(QWidget):
@@ -377,11 +391,17 @@ class CustomersPage(QWidget):
         if dialog.exec():
             self.search.clear()
             self.refresh()
-            CustomerCard(self.records, dialog.contact_id, self).exec()
-            self.refresh()
+            return self.show_customer(dialog.contact_id)
 
     def open_customer(self):
         row = self.table.currentRow()
         if 0 <= row < len(self.rows):
-            CustomerCard(self.records, self.rows[row]["id"], self).exec()
-            self.refresh()
+            return self.show_customer(self.rows[row]["id"])
+
+    def show_customer(self, contact_id):
+        workspace = work_windows(self)
+
+        return workspace.open(
+            (CustomerCard, contact_id),
+            lambda: CustomerCard(self.records, contact_id, workspace=workspace),
+        )

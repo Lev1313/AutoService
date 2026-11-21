@@ -540,12 +540,11 @@ class CallsPage(QWidget):
         )
 
     def open_car(self):
-        from app.ui.vehicles import VehicleCard
+        from app.ui.vehicles import open_vehicle_card
 
         row = self.table.currentRow()
         if 0 <= row < len(self.rows):
-            VehicleCard(self.records, self.rows[row]["vehicle_id"], self).exec()
-            self.refresh()
+            return open_vehicle_card(self.records, self.rows[row]["vehicle_id"], self)
 
     def result(self):
         row = self.table.currentRow()

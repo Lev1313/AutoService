@@ -92,7 +92,7 @@ def build_service_sheet(document: dict) -> bytes:
 
     name = " ".join(
         filter(
-            None, (vehicle["plate"], vehicle["vin"].lower(), vehicle["model"] or vehicle["make"])
+            None, (vehicle["plate"], vehicle["vin"].upper(), vehicle["model"] or vehicle["make"])
         )
     )
     visit = repair["visit_date"]

@@ -35,6 +35,7 @@ from app.services.records import (
     search_key,
 )
 from app.ui.theme import STATUS_TONE, StatusDelegate
+from app.ui.work_windows import work_windows
 
 ERRORS = (ValueError, OSError, sqlite3.Error)
 
@@ -134,7 +135,13 @@ class VehicleDialog(SafeDialog):
         super().__init__(parent)
         self.records = records
         self.vehicle_id = vehicle_id
-        self.setWindowTitle("Автомобиль" if vehicle_id else "Добавить автомобиль")
+        vehicle = records.vehicle(vehicle_id) if vehicle_id is not None else None
+        self.saved_vehicle = vehicle
+        self.setWindowTitle(
+            f"Изменить автомобиль · {vehicle_label(vehicle)}"
+            if vehicle is not None
+            else "Добавить автомобиль"
+        )
         self.setMinimumWidth(530)
         layout = QVBoxLayout(self)
         layout.addWidget(plain_label("Достаточно марки, модели, госномера или VIN."))
@@ -170,8 +177,7 @@ class VehicleDialog(SafeDialog):
         form.addRow("Описание", self.notes)
         layout.addLayout(form)
         self.contacts.currentIndexChanged.connect(self.choose_contact)
-        if vehicle_id is not None:
-            vehicle = records.vehicle(vehicle_id)
+        if vehicle is not None:
             index = self.contacts.findData(vehicle["contact_id"])
             self.contacts.setCurrentIndex(max(0, index))
             for key, field in self.fields.items():
@@ -261,6 +267,13 @@ class VehicleDialog(SafeDialog):
 
     def save(self):
         try:
+            if (
+                self.saved_vehicle is not None
+                and self.records.vehicle(self.vehicle_id) != self.saved_vehicle
+            ):
+                raise ValueError(
+                    "Карточка изменилась в другом окне. Откройте её заново перед сохранением."
+                )
             values = self.state()
             year = values["year"].strip()
             if year and (not year.isascii() or not year.isdigit()):
@@ -309,11 +322,12 @@ class RepairDialog(SafeDialog):
         self.vehicle_id = vehicle_id
         self.repair = repair or {}
         self.appointment = appointment
-        self.setWindowTitle("Запись ремонта")
+        identity = vehicle_label(records.vehicle(vehicle_id)) or "Автомобиль"
+        self.setWindowTitle(f"Ремонт · {identity}")
         self.resize(740, 610)
         self.setMinimumSize(550, 450)
         layout = QVBoxLayout(self)
-        heading = plain_label(vehicle_label(records.vehicle(vehicle_id)) or "Автомобиль")
+        heading = plain_label(identity)
         heading.setObjectName("repairTitle")
         layout.addWidget(heading)
         if appointment and appointment["reason"]:
@@ -513,8 +527,6 @@ class RepairDialog(SafeDialog):
         return True
 
     def open_documents(self):
-        from app.ui.documents import DocumentDialog
-
         if self.repair.get("id") is None or self.state() != self.original:
             if (
                 QMessageBox.question(
@@ -529,7 +541,7 @@ class RepairDialog(SafeDialog):
                 return
             if not self.save(close=False):
                 return
-        DocumentDialog(self.records, self.repair["id"], self).exec()
+        return open_document_window(self.records, self.repair["id"], self)
 
     def open_source(self):
         from app.ui.txt_import import SourceDialog
@@ -541,11 +553,11 @@ class RepairDialog(SafeDialog):
 
 
 class VehicleCard(QDialog):
-    def __init__(self, records: Records, vehicle_id: int, parent=None):
+    def __init__(self, records: Records, vehicle_id: int, parent=None, *, workspace=None):
         super().__init__(parent)
         self.records = records
         self.vehicle_id = vehicle_id
-        self.setWindowTitle("Карточка автомобиля")
+        self._work_windows = workspace or work_windows(self)
         self.resize(940, 700)
         self.setMinimumSize(650, 500)
         layout = QVBoxLayout(self)
@@ -607,6 +619,16 @@ class VehicleCard(QDialog):
         layout.addLayout(bottom)
         self.rows = []
         self.refresh()
+        self._work_windows.vehicle_saved.connect(self.refresh_vehicle)
+        self._work_windows.repair_saved.connect(self.refresh_repair)
+
+    def refresh_vehicle(self, vehicle_id):
+        if self.vehicle_id == vehicle_id:
+            self.refresh()
+
+    def refresh_repair(self, vehicle_id, repair_id):
+        if self.vehicle_id == vehicle_id:
+            self.refresh(repair_id)
 
     def refresh(self, repair_id=None):
         saved = repair_id is not None
@@ -614,6 +636,7 @@ class VehicleCard(QDialog):
         if repair_id is None and 0 <= previous < len(self.rows):
             repair_id = self.rows[previous]["id"]
         vehicle = self.records.vehicle(self.vehicle_id)
+        self.setWindowTitle(f"Автомобиль · {vehicle_label(vehicle) or 'Карточка'}")
         name = " ".join(filter(None, (vehicle["make"], vehicle["model"]))) or "Автомобиль"
         self.heading.setText(f"{name} · {vehicle['plate'] or 'без госномера'}")
         latest = self.records.latest_mileage(self.vehicle_id)
@@ -703,6 +726,8 @@ class VehicleCard(QDialog):
                 QMessageBox.warning(self, "Не удалось открыть источник", str(error))
 
     def toggle_deleted(self):
+        from app.ui.documents import DocumentDialog
+
         row = self.history.currentRow()
         if not 0 <= row < len(self.rows):
             return
@@ -738,6 +763,10 @@ class VehicleCard(QDialog):
                 != QMessageBox.StandardButton.Yes
             ):
                 return
+            for dialog_type in (RepairDialog, DocumentDialog):
+                editor = self._work_windows.find((dialog_type, repair["id"]))
+                if editor is not None and not editor.close():
+                    return
             try:
                 self.records.set_repair_deleted(self.vehicle_id, repair["id"], deleting)
             except RestoreMileageConflict as conflict:
@@ -755,13 +784,12 @@ class VehicleCard(QDialog):
                 self.records.set_repair_deleted(
                     self.vehicle_id, repair["id"], False, allow_unverified=True
                 )
-            self.refresh()
+            self._work_windows.vehicle_saved.emit(self.vehicle_id)
         except ERRORS as error:
             QMessageBox.warning(self, "Не удалось изменить ремонт", str(error))
 
     def edit_vehicle(self):
-        if VehicleDialog(self.records, self.vehicle_id, self).exec():
-            self.refresh()
+        return open_vehicle_editor(self.records, self, self.vehicle_id)
 
     def open_maintenance(self):
         from app.ui.maintenance import PlansDialog
@@ -770,24 +798,75 @@ class VehicleCard(QDialog):
         self.refresh()
 
     def edit_repair(self, repair=None):
-        dialog = RepairDialog(self.records, self.vehicle_id, repair, self)
-        dialog.repair_saved.connect(self.refresh)
-        dialog.exec()
+        return open_repair_window(self.records, self.vehicle_id, self, repair)
 
     def add_repair(self):
-        self.edit_repair()
+        return self.edit_repair()
 
     def open_repair(self):
         row = self.history.currentRow()
         if 0 <= row < len(self.rows) and not self.rows[row]["deleted_at"]:
-            self.edit_repair(self.rows[row])
+            return self.edit_repair(self.rows[row])
 
     def open_documents(self):
-        from app.ui.documents import DocumentDialog
-
         row = self.history.currentRow()
         if 0 <= row < len(self.rows):
-            DocumentDialog(self.records, self.rows[row]["id"], self).exec()
+            return open_document_window(self.records, self.rows[row]["id"], self)
+
+
+def open_vehicle_card(records, vehicle_id, owner):
+    workspace = work_windows(owner)
+    return workspace.open(
+        (VehicleCard, vehicle_id), lambda: VehicleCard(records, vehicle_id, workspace=workspace)
+    )
+
+
+def open_vehicle_editor(records, owner, vehicle_id=None, *, contact_id=None, after_create=None):
+    workspace = work_windows(owner)
+
+    def create():
+        editor = VehicleDialog(records, vehicle_id, contact_id=contact_id)
+
+        def saved():
+            workspace.vehicle_saved.emit(editor.vehicle_id)
+            if after_create is not None and not workspace.closing:
+                after_create(editor.vehicle_id)
+
+        editor.accepted.connect(saved)
+        return editor
+
+    key = (VehicleDialog, vehicle_id) if vehicle_id is not None else None
+    return workspace.open(key, create)
+
+
+def open_repair_window(records, vehicle_id, owner, repair=None, *, appointment=None):
+    workspace = work_windows(owner)
+    if repair is not None:
+        key = (RepairDialog, repair["id"])
+    elif appointment is not None:
+        key = (RepairDialog, "appointment", appointment["id"])
+    else:
+        key = (RepairDialog, "new", vehicle_id)
+
+    def create():
+        editor = RepairDialog(records, vehicle_id, repair, appointment=appointment)
+
+        def saved(repair_id):
+            workspace.dialogs[editor] = (RepairDialog, repair_id)
+            workspace.repair_saved.emit(vehicle_id, repair_id)
+
+        editor.repair_saved.connect(saved)
+        return editor
+
+    return workspace.open(key, create)
+
+
+def open_document_window(records, repair_id, owner):
+    from app.ui.documents import DocumentDialog
+
+    return work_windows(owner).open(
+        (DocumentDialog, repair_id), lambda: DocumentDialog(records, repair_id)
+    )
 
 
 class VehiclesPage(QWidget):
@@ -870,12 +949,12 @@ class VehiclesPage(QWidget):
             )
 
     def add_vehicle(self):
-        dialog = VehicleDialog(self.records, parent=self)
-        if dialog.exec():
+        def created(vehicle_id):
             self.search.clear()
             self.refresh()
-            VehicleCard(self.records, dialog.vehicle_id, self).exec()
-            self.refresh()
+            open_vehicle_card(self.records, vehicle_id, self)
+
+        return open_vehicle_editor(self.records, self, after_create=created)
 
     def import_txt(self):
         from app.ui.txt_import import ImportDialog
@@ -886,5 +965,4 @@ class VehiclesPage(QWidget):
     def open_vehicle(self):
         row = self.table.currentRow()
         if 0 <= row < len(self.rows):
-            VehicleCard(self.records, self.rows[row]["id"], self).exec()
-            self.refresh()
+            return open_vehicle_card(self.records, self.rows[row]["id"], self)

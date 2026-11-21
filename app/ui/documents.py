@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 from app.services.documents import Documents, TotalMismatch, item_price_total, normalize_items
 from app.services.receipt_pdf import pdf_bytes, save_pdf
 from app.services.records import amount_text
-from app.ui.vehicles import ERRORS, SafeDialog, plain_label, primary_button
+from app.ui.vehicles import ERRORS, SafeDialog, plain_label, primary_button, vehicle_label
 
 ITEM_FIELDS = ("title", "quantity", "price")
 
@@ -125,7 +125,8 @@ class DocumentDialog(SafeDialog):
         self.previous_index = -1
         self.current_document = None
         self.content = None
-        self.setWindowTitle("Документ / Печать")
+        vehicle = self.records.vehicle(self.source_repair()["vehicle_id"])
+        self.setWindowTitle(f"Документ / Печать · {vehicle_label(vehicle) or 'Автомобиль'}")
         self.resize(1180, 790)
         self.setMinimumSize(850, 580)
         layout = QVBoxLayout(self)

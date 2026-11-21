@@ -145,35 +145,28 @@ def test_enter_saves_repair_without_completing_it(application, records):
 def test_repair_saved_for_document_appears_even_when_editor_is_closed(
     application, records, monkeypatch
 ):
-    from app.ui.documents import DocumentDialog
-
     car = records.save_vehicle({"plate": "ТЕСТ"})
     card = VehicleCard(records, car)
     assert not card.document_button.isEnabled()
     monkeypatch.setattr(QMessageBox, "question", lambda *_: QMessageBox.StandardButton.Yes)
-    monkeypatch.setattr(DocumentDialog, "exec", lambda _: QDialog.DialogCode.Rejected)
-
-    def edit_then_close(editor):
-        editor.description.setPlainText("Диагностика")
-        editor.document_button.click()
-        assert card.history.rowCount() == 1
-        assert editor.save_notice.text() == "Ремонт сохранён."
-        editor.cancel_button.click()
-        return editor.result()
-
-    monkeypatch.setattr(RepairDialog, "exec", edit_then_close)
-    card.add_repair()
+    editor = card.add_repair()
+    editor.description.setPlainText("Диагностика")
+    document = editor.open_documents()
+    assert document.isVisible() and not document.isModal()
+    assert card.history.rowCount() == 1
+    assert editor.save_notice.text() == "Ремонт сохранён."
+    editor.cancel_button.click()
+    assert card.open_documents() is document
 
     assert card.document_button.isEnabled()
     assert card.save_notice.text() == "Ремонт сохранён."
     assert card.preview.toPlainText() == "Диагностика"
     assert len(records.repairs(car)) == 1
+    document.close()
     card.close()
 
 
-def test_edit_keeps_the_same_repair_selected_when_history_reorders(
-    application, records, monkeypatch
-):
+def test_edit_keeps_the_same_repair_selected_when_history_reorders(application, records):
     car = records.save_vehicle({"plate": "ТЕСТ"})
     edited = records.save_repair(car, {"visit_date": "2026-10-01", "description": "Старый"})
     records.save_repair(car, {"visit_date": "2026-10-10", "description": "Другой"})
@@ -182,18 +175,56 @@ def test_edit_keeps_the_same_repair_selected_when_history_reorders(
     assert card.rows[card.history.currentRow()]["id"] == other
     card.history.selectRow(2)
 
-    def edit_and_save(editor):
-        editor.visit_date.setDate(QDate(2026, 10, 15))
-        editor.description.setPlainText("Проверено")
-        editor.save_button.click()
-        return editor.result()
-
-    monkeypatch.setattr(RepairDialog, "exec", edit_and_save)
-    card.open_repair()
+    editor = card.open_repair()
+    editor.visit_date.setDate(QDate(2026, 10, 15))
+    editor.description.setPlainText("Проверено")
+    editor.save_button.click()
     assert card.history.currentRow() == 1
     assert card.rows[card.history.currentRow()]["id"] == edited
     assert card.preview.toPlainText() == "Проверено"
     card.close()
+
+
+def test_three_cars_can_be_edited_independently(application, tmp_path, monkeypatch):
+    window = create_window(tmp_path / "parallel.sqlite3")
+    monkeypatch.setattr(QMessageBox, "question", lambda *_: QMessageBox.StandardButton.Discard)
+    window.show()
+    try:
+        page = window.vehicles_page
+        for make in ("Ford", "Honda", "Volkswagen"):
+            window.records.save_vehicle({"make": make})
+        page.refresh()
+        cards = []
+        repairs = []
+        for index in range(3):
+            page.table.selectRow(index)
+            card = page.open_vehicle()
+            cards.append(card)
+            assert page.open_vehicle() is card
+            editor = card.add_repair()
+            repairs.append(editor)
+            editor.description.setPlainText(f"Ремонт {index + 1}")
+            assert card.add_repair() is editor
+        assert len(window.workspace.dialogs) == 6
+        assert window.isEnabled()
+        assert all(dialog.isVisible() and not dialog.isModal() for dialog in cards + repairs)
+        window.list_work_windows()
+        assert len(window.window_menu.actions()) == 6
+
+        assert repairs[1].save(close=False)
+        assert cards[1].open_repair() is repairs[1]
+        assert cards[1].preview.toPlainText() == "Ремонт 2"
+        assert repairs[0].description.toPlainText() == "Ремонт 1"
+        assert repairs[2].description.toPlainText() == "Ремонт 3"
+
+        with monkeypatch.context() as canceled:
+            canceled.setattr(QMessageBox, "question", lambda *_: QMessageBox.StandardButton.Cancel)
+            assert not window.close()
+        assert window.isVisible() and repairs[2].isVisible()
+        assert repairs[2].description.toPlainText() == "Ремонт 3"
+    finally:
+        window.close()
+    assert not window.workspace.dialogs
 
 
 def test_current_repair_filter_combines_with_search(application, records):

@@ -201,6 +201,7 @@ class Records:
         fields = ("make", "model", "plate", "vin", "notes")
         cleaned = {field: str(values.get(field, "")).strip() for field in fields}
         cleaned["plate"] = cleaned["plate"].lower()
+        cleaned["vin"] = cleaned["vin"].upper()
         if not any(cleaned[field] for field in ("make", "model", "plate", "vin")):
             raise ValueError("Укажите хотя бы марку, модель, госномер или VIN.")
         year = values.get("year")

@@ -33,9 +33,9 @@ from app.services.appointments import ACTIVE_STATUSES, STATUSES, Appointments
 from app.ui.theme import STATUS_TONE, StatusDelegate
 from app.ui.vehicles import (
     ERRORS,
-    RepairDialog,
     SafeDialog,
     make_table,
+    open_repair_window,
     plain_label,
     primary_button,
     vehicle_label,
@@ -481,11 +481,10 @@ class AppointmentsPage(QWidget):
                     self, "Ремонт удалён", "Восстановите связанный ремонт в карточке автомобиля."
                 )
                 return
-        RepairDialog(
+        return open_repair_window(
             self.records,
             row["vehicle_id"],
-            repair,
             self,
+            repair,
             appointment=row,
-        ).exec()
-        self.refresh()
+        )
