@@ -122,7 +122,7 @@ class DocumentDialog(SafeDialog):
         self.previous_index = -1
         self.current_document = None
         self.content = None
-        self.setWindowTitle("Квитанция / Печать")
+        self.setWindowTitle("Документ / Печать")
         self.resize(1180, 790)
         self.setMinimumSize(850, 580)
         layout = QVBoxLayout(self)
@@ -132,13 +132,13 @@ class DocumentDialog(SafeDialog):
         self.document_status.setAccessibleName("Статус квитанции")
         layout.addWidget(self.document_status, alignment=Qt.AlignmentFlag.AlignLeft)
         history_row = QHBoxLayout()
-        history_label = plain_label("Оформленные квитанции")
+        history_label = plain_label("Оформленные документы")
         history_row.addWidget(history_label)
         self.history = QComboBox()
         self.history.currentIndexChanged.connect(self.switch_history)
         history_label.setBuddy(self.history)
         history_row.addWidget(self.history, 1)
-        self.new_button = QPushButton("Новая квитанция")
+        self.new_button = QPushButton("Новый документ")
         self.new_button.clicked.connect(self.new_receipt)
         history_row.addWidget(self.new_button)
         layout.addLayout(history_row)
@@ -149,12 +149,27 @@ class DocumentDialog(SafeDialog):
         self.kind = QComboBox()
         self.kind.addItem("Простая: описание и общая сумма", "simple")
         self.kind.addItem("Подробная: работы и запчасти", "detailed")
+        self.kind.addItem("Фольц Мастер: сервисный лист", "service_sheet")
         self.kind.currentIndexChanged.connect(self.changed)
         left.addWidget(self.kind)
         left.addWidget(plain_label("Описание для документа"))
         self.description = QPlainTextEdit()
         self.description.textChanged.connect(self.changed)
         left.addWidget(self.description, 1)
+        self.recommendations_panel = QWidget()
+        recommendations_layout = QVBoxLayout(self.recommendations_panel)
+        recommendations_layout.setContentsMargins(0, 0, 0, 0)
+        recommendations_layout.addWidget(plain_label("Рекомендации для сервисного листа"))
+        self.recommendations = QPlainTextEdit()
+        self.recommendations.setPlaceholderText(
+            "Необязательно. Сохраняются в черновике и документе."
+        )
+        self.recommendations.textChanged.connect(self.changed)
+        recommendations_layout.addWidget(self.recommendations)
+        recommendations_layout.addWidget(
+            plain_label("Шапка и контакты — из шаблона «Фольц Мастер».")
+        )
+        left.addWidget(self.recommendations_panel, 1)
         self.items_panel = QWidget()
         positions = QVBoxLayout(self.items_panel)
         positions.setContentsMargins(0, 0, 0, 0)
@@ -234,9 +249,11 @@ class DocumentDialog(SafeDialog):
         self.history.clear()
         for document in documents:
             kind = "Простая" if document["kind"] == "simple" else "Подробная"
+            if document["number"].startswith("СЛ-"):
+                kind = "Сервисный лист"
             stamp = datetime.fromisoformat(document["created_at"]).strftime("%d.%m.%Y %H:%M")
             self.history.addItem(f"{document['number']} · {stamp} · {kind}", document["id"])
-        self.history.setPlaceholderText("Выберите квитанцию" if documents else "Квитанций пока нет")
+        self.history.setPlaceholderText("Выберите документ" if documents else "Документов пока нет")
         self.history.setEnabled(bool(documents))
         index = self.history.findData(selected) if selected else 0 if documents else -1
         self.history.setCurrentIndex(index)
@@ -291,7 +308,7 @@ class DocumentDialog(SafeDialog):
         self.current_document = None
         self.clear_preview()
         self.new_button.setEnabled(saved and not self.deleted_repair)
-        for widget in (self.kind, self.description, self.items_panel):
+        for widget in (self.kind, self.description, self.items_panel, self.recommendations_panel):
             widget.setEnabled(editable)
         for button in (self.draft_button, self.create_button):
             button.setVisible(editable)
@@ -301,9 +318,9 @@ class DocumentDialog(SafeDialog):
         self.print_button.setEnabled(editable)
         self.print_button.setText("Печать" if saved else "Оформить и печатать")
         self.print_button.setToolTip(
-            "Проверьте квитанцию здесь. В окне Windows выберите принтер."
+            "Проверьте документ здесь. В окне Windows выберите принтер."
             if saved
-            else "Сохранить квитанцию с номером и открыть окно печати Windows."
+            else "Сохранить документ с номером и открыть окно печати Windows."
         )
         self.current_document = self.service.get(document_id) if saved else None
         if self.current_document:
@@ -311,6 +328,8 @@ class DocumentDialog(SafeDialog):
             payload = self.current_document["payload"]
             values = {
                 "kind": self.current_document["kind"],
+                "layout": payload.get("layout", "receipt"),
+                "recommendations": payload.get("recommendations", ""),
                 "description": payload["description"],
                 "items": [
                     {
@@ -331,12 +350,17 @@ class DocumentDialog(SafeDialog):
                 "items": [],
             }
             values = with_repair
-        self.kind.setCurrentIndex(max(0, self.kind.findData(values["kind"])))
+        selected_kind = (
+            "service_sheet" if values.get("layout") == "service_sheet" else values["kind"]
+        )
+        self.kind.setCurrentIndex(max(0, self.kind.findData(selected_kind)))
         self.description.setPlainText(values["description"])
+        self.recommendations.setPlainText(values.get("recommendations", ""))
         self.items.setRowCount(0)
         for row in values["items"]:
             self.add_item(values=row)
         self.items_panel.setVisible(values["kind"] == "detailed")
+        self.recommendations_panel.setVisible(selected_kind == "service_sheet")
         self.original = self.state()
         self.busy = False
         self.update_total()
@@ -344,7 +368,7 @@ class DocumentDialog(SafeDialog):
             self.load_pdf(self.service.pdf_content(self.current_document["id"]))
             self.message.setText("В окне печати Windows выберите принтер.")
         elif editable:
-            self.message.setText("Квитанция получит номер при оформлении.")
+            self.message.setText("Документ получит номер при оформлении.")
             self.preview()
         else:
             self.clear_preview(
@@ -396,12 +420,19 @@ class DocumentDialog(SafeDialog):
                 }
             )
         return {
-            "kind": self.kind.currentData(),
+            "kind": "simple"
+            if self.kind.currentData() == "service_sheet"
+            else self.kind.currentData(),
+            "layout": "service_sheet" if self.kind.currentData() == "service_sheet" else "receipt",
+            "recommendations": self.recommendations.toPlainText(),
             "description": self.description.toPlainText(),
             "items": rows,
         }
 
     def update_total(self):
+        if self.kind.currentData() == "service_sheet":
+            self.total.setText("Сервисный лист без стоимости работ и запчастей")
+            return
         if self.kind.currentData() == "simple":
             value = amount_text(
                 self.current_document["payload"]["total_kopecks"]
@@ -422,9 +453,10 @@ class DocumentDialog(SafeDialog):
         if self.busy:
             return
         self.items_panel.setVisible(self.kind.currentData() == "detailed")
+        self.recommendations_panel.setVisible(self.kind.currentData() == "service_sheet")
         self.clear_preview("Обновляем предпросмотр…")
         self.document_status.setText("Черновик")
-        self.message.setText("Квитанция получит номер при оформлении.")
+        self.message.setText("Документ получит номер при оформлении.")
         self.update_total()
         self.preview_timer.start()
 
@@ -485,7 +517,7 @@ class DocumentDialog(SafeDialog):
                     self.repair_id, **value, allow_difference=True, consume_draft=True
                 )
         except (*ERRORS, RuntimeError) as error:
-            QMessageBox.warning(self, "Не удалось оформить квитанцию", str(error))
+            QMessageBox.warning(self, "Не удалось оформить документ", str(error))
             return False
         self.current_document = result
         self.preview_timer.stop()
@@ -514,7 +546,7 @@ class DocumentDialog(SafeDialog):
             self.accept()
         elif not self.current_document:
             self.document_status.setText("Черновик сохранён")
-            self.message.setText("Квитанция получит номер при оформлении.")
+            self.message.setText("Документ получит номер при оформлении.")
         return True
 
     def settings(self):
@@ -531,7 +563,7 @@ class DocumentDialog(SafeDialog):
             return
         filename, _ = QFileDialog.getSaveFileName(
             self,
-            "Сохранить квитанцию",
+            "Сохранить документ",
             f"{self.current_document['number']}.pdf",
             "PDF (*.pdf)",
         )

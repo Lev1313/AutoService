@@ -53,6 +53,10 @@ def pdf_bytes(document: dict) -> bytes:
 
 
 def build_pdf(document: dict) -> bytes:
+    if document["payload"].get("layout") == "service_sheet":
+        from app.services.service_sheet_pdf import build_service_sheet
+
+        return build_service_sheet(document)
     register_fonts()
     data = document["payload"]
     service, vehicle, repair = data["service"], data["vehicle"], data["repair"]

@@ -110,9 +110,15 @@ class Documents:
         preview=False,
         *,
         consume_draft=False,
+        layout="receipt",
+        recommendations="",
     ):
         if kind not in ("simple", "detailed"):
             raise ValueError("Выберите формат квитанции.")
+        if layout not in ("receipt", "service_sheet"):
+            raise ValueError("Выберите шаблон документа.")
+        if layout == "service_sheet" and kind != "simple":
+            raise ValueError("Сервисный лист использует описание работ без ценовых позиций.")
         normalized = normalize_items(items or []) if kind == "detailed" else []
         with connect(self.path) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -151,6 +157,8 @@ class Documents:
             stored_settings = dict(connection.execute("SELECT key,value FROM document_settings"))
             payload = {
                 "schema": 1,
+                "layout": layout,
+                "recommendations": str(recommendations),
                 "repair": dict(repair),
                 "vehicle": dict(vehicle),
                 "service": {key: stored_settings.get(key, "") for key in SETTINGS},
@@ -173,15 +181,16 @@ class Documents:
                 "VALUES (?,?,?,?,?)",
                 (uuid4().hex, repair_id, created, kind, json.dumps(payload, ensure_ascii=False)),
             ).lastrowid
+            number = f"{'СЛ' if layout == 'service_sheet' else 'КВ'}-{document_id:06d}"
             connection.execute(
                 "UPDATE documents SET number=? WHERE id=?",
-                (f"КВ-{document_id:06d}", document_id),
+                (number, document_id),
             )
             from app.services.receipt_pdf import pdf_bytes
 
             snapshot = {
                 "id": document_id,
-                "number": f"КВ-{document_id:06d}",
+                "number": number,
                 "created_at": created,
                 "kind": kind,
                 "payload": payload,

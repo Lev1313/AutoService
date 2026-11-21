@@ -103,6 +103,11 @@ def prepare(root):
     )
     content = documents.pdf_content(detailed["id"])
     (root / "receipt.pdf").write_bytes(content)
+    sheet = documents.create(
+        repair, layout="service_sheet", recommendations="Тестовая рекомендация из шаблона."
+    )
+    sheet_content = documents.pdf_content(sheet["id"])
+    (root / "service-sheet.pdf").write_bytes(sheet_content)
 
     source_path = root / "synthetic.txt"
     raw = (
@@ -198,6 +203,8 @@ def prepare(root):
         "carried_repair": carried,
         "carried_document": carried_document["id"],
         "documents": [simple["id"], detailed["id"]],
+        "service_sheet": sheet["id"],
+        "service_sheet_sha256": sha256(sheet_content).hexdigest(),
         "imported_repair": imported["repair_id"],
         "pdf_sha256": sha256(content).hexdigest(),
         "txt_sha256": sha256(raw).hexdigest(),
@@ -370,6 +377,18 @@ def reopen(root, report):
         dialog.show()
         QTest.qWait(800)
         check(dialog.grab().save(str(root / "document-window.png")), "Снимок документа")
+        dialog.history.setCurrentIndex(dialog.history.findData(report["service_sheet"]))
+        check(
+            sha256(dialog.content).hexdigest() == report["service_sheet_sha256"],
+            "Сервисный лист после восстановления и перезапуска",
+        )
+        check("Тестовая рекомендация" in dialog.pdf.getAllText(0).text(), "Рекомендации в PDF")
+        check(dialog.kind.currentData() == "service_sheet", "Выбор шаблона в окне")
+        printer.setOutputFileName(str(root / "service-sheet-printed.pdf"))
+        print_pdf(dialog.pdf, printer)
+        check((root / "service-sheet-printed.pdf").stat().st_size > 1000, "Печать сервисного листа")
+        QTest.qWait(200)
+        check(dialog.grab().save(str(root / "service-sheet-window.png")), "Снимок сервисного листа")
         dialog.close()
         report.update(stage="passed", schema=SCHEMA_VERSION)
     finally:
