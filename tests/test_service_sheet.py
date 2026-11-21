@@ -1,4 +1,4 @@
-from PySide6.QtCore import QBuffer, QIODevice, QSize
+from PySide6.QtCore import QBuffer, QIODevice, QRect, QSize
 from PySide6.QtPdf import QPdfDocument
 
 from app.database.connection import initialize_database
@@ -55,9 +55,9 @@ def test_sheet_fields_no_prices_and_immutable_snapshot(application, tmp_path):
     text = pdf.getAllText(0).text()
     for value in (
         "тест 001",
-        "TESTVIN00000000001",
-        "21.11.2026",
-        "123 456",
+        "testvin00000000001",
+        "21.11.26",
+        "123456км",
         "<скобки>",
         "рекомендации:",
         "Учебная рекомендация",
@@ -75,6 +75,28 @@ def test_sheet_fields_no_prices_and_immutable_snapshot(application, tmp_path):
     )
     receipt = service.create(repair)
     assert receipt["number"] == "КВ-000002"
+
+
+def test_both_pdf_formats_share_original_full_header(application, tmp_path):
+    _, service, _, repair = setup_repair(tmp_path)
+    size = QSize(1191, 1684)
+    bounds = QRect(170, 112, 965, 182)
+    headers = []
+    for layout in ("receipt", "service_sheet"):
+        preview = service.create(repair, layout=layout, preview=True)
+        pdf, buffer = open_pdf(pdf_bytes(preview))
+        headers.append(pdf.render(0, size).copy(bounds))
+        pdf.close()
+        buffer.close()
+
+    assert headers[0] == headers[1]
+    # Светлые и тёмные участки есть и слева с рисунком, и справа с контактами.
+    for start, end in ((0, 480), (710, bounds.width())):
+        assert any(
+            headers[0].pixelColor(x, y).lightness() < 128
+            for x in range(start, end, 4)
+            for y in range(0, bounds.height(), 4)
+        )
 
 
 def test_sheet_long_text_and_missing_fields(application, tmp_path):

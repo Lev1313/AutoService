@@ -9,7 +9,6 @@ from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_RIGHT
-from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
@@ -24,6 +23,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from app.services.foltz_pdf import FOLTZ_PAGE, draw_foltz_header
 from app.services.records import amount_text, mileage_text
 
 
@@ -82,7 +82,8 @@ def build_pdf(document: dict) -> bytes:
     def paragraph(value, selected=style):
         return Paragraph(escape(str(value)).replace("\n", "<br/>"), selected)
 
-    flow = []
+    # Только первая страница содержит шапку и увеличенный верхний отступ.
+    flow = [Spacer(1, 151 - 16 * mm)]
     if service["name"]:
         flow.append(paragraph(service["name"], section))
     for key in ("address", "phone", "requisites"):
@@ -183,12 +184,16 @@ def build_pdf(document: dict) -> bytes:
         canvas.setFont("Receipt", 8)
         canvas.setFillColor(colors.HexColor("#536174"))
         canvas.drawString(18 * mm, 11 * mm, document["number"])
-        canvas.drawRightString(A4[0] - 18 * mm, 11 * mm, f"Страница {doc.page}")
+        canvas.drawRightString(FOLTZ_PAGE[0] - 18 * mm, 11 * mm, f"Страница {doc.page}")
         canvas.restoreState()
+
+    def first_page(canvas, doc):
+        draw_foltz_header(canvas)
+        footer(canvas, doc)
 
     template = SimpleDocTemplate(
         stream,
-        pagesize=A4,
+        pagesize=FOLTZ_PAGE,
         leftMargin=18 * mm,
         rightMargin=18 * mm,
         topMargin=16 * mm,
@@ -196,7 +201,7 @@ def build_pdf(document: dict) -> bytes:
         title=f"Квитанция {document['number']}",
         author=service["name"] or "AutoService",
     )
-    template.build(flow, onFirstPage=footer, onLaterPages=footer)
+    template.build(flow, onFirstPage=first_page, onLaterPages=footer)
     return stream.getvalue()
 
 

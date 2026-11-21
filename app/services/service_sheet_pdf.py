@@ -1,60 +1,115 @@
 """Сервисный лист по оригинальному бланку владельца, без зависимости от Word."""
 
 import os
+from datetime import date
 from io import BytesIO
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-from reportlab.lib.enums import TA_CENTER
-from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer
+from reportlab.platypus import BaseDocTemplate, Flowable, Frame, PageTemplate, Paragraph, Spacer
 
-from app.services.receipt_pdf import human_date, register_fonts
+from app.services.foltz_pdf import FOLTZ_PAGE, draw_foltz_header
+from app.services.receipt_pdf import register_fonts
 from app.services.records import mileage_text
 
-ASSETS = Path(__file__).resolve().parents[1] / "assets" / "service_sheet"
+TEXT_LEFT = 67.104
+FIRST_BASELINE = 622.06
+BODY_SIZE = 14.04
+LINE_HEIGHT = 19.5
+BODY_WIDTH = 484.03
+BOTTOM_MARGIN = 45
+
+
+class ServiceSheetBand(Flowable):
+    """Векторная полоса и надпись FOLTZ MASTER по меркам исходного PDF."""
+
+    def __init__(self):
+        super().__init__()
+        self.width = BODY_WIDTH
+        self.height = 25.2
+
+    def draw(self):
+        canvas = self.canv
+        canvas.setFillGray(0.98)
+        canvas.rect(0, 0, self.width, self.height, stroke=0, fill=1)
+        canvas.setFillGray(0)
+        for x, y, width, height in (
+            (0, 15.6, 366.17, 0.72),
+            (0, 17.04, 366.17, 0.72),
+            (366.166, 16.2, 3, 0.84),
+            (369.166, 15.84, 114.86, 0.72),
+        ):
+            canvas.rect(x, y, width, height, stroke=0, fill=1)
+        canvas.setFont("ServiceSheetWordmark", 14.52)
+        letter_positions = (
+            434.35,
+            443.26,
+            454.54,
+            464.26,
+            473.98,
+            487.3,
+            500.98,
+            511.42,
+            519.46,
+            529.06,
+            538.78,
+        )
+        for letter, x in zip("FOLTZMASTER", letter_positions, strict=True):
+            for offset, shade in ((1.92, 0.6), (0, 0), (0.96, 0)):
+                canvas.setFillGray(shade)
+                canvas.drawString(x - TEXT_LEFT + offset, 14.76 - offset, letter)
 
 
 def build_service_sheet(document: dict) -> bytes:
     register_fonts()
     if "ServiceSheet" not in pdfmetrics.getRegisteredFontNames():
         fonts = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
-        for name, filename in (("ServiceSheet", "comici.ttf"), ("ServiceSheetBold", "comicz.ttf")):
+        for name, filename in (
+            ("ServiceSheetWordmark", "timesbd.ttf"),
+            ("ServiceSheetBold", "comicbd.ttf"),
+            ("ServiceSheet", "comic.ttf"),
+        ):
             path = fonts / filename
             if not path.is_file():
-                raise RuntimeError("Не найден шрифт Comic Sans MS из шаблона сервисного листа.")
+                raise RuntimeError(f"Не найден шрифт сервисного листа: {filename}.")
             pdfmetrics.registerFont(TTFont(name, str(path)))
     data = document["payload"]
     repair, vehicle = data["repair"], data["vehicle"]
     body = ParagraphStyle(
         "SheetBody",
         fontName="ServiceSheet",
-        fontSize=14,
-        leading=19.5,
-        leftIndent=-6,
-        rightIndent=-6,
+        fontSize=BODY_SIZE,
+        leading=LINE_HEIGHT,
     )
     bold = ParagraphStyle("SheetBold", parent=body, fontName="ServiceSheetBold", keepWithNext=True)
-    title = ParagraphStyle(
-        "SheetVehicle", fontName="Receipt", fontSize=14, leading=19.5, alignment=TA_CENTER
-    )
 
     def paragraph(text, style=body):
-        return Paragraph(escape(str(text)).replace("\n", "<br/>"), style)
+        return Paragraph(escape(text), style)
 
     name = " ".join(
-        str(vehicle.get(key) or "") for key in ("plate", "vin", "make", "model")
-    ).strip()
-    flow = [paragraph(name or "Автомобиль не указан", title), Spacer(1, 26)]
-    flow.append(paragraph(human_date(repair["visit_date"])))
-    mileage = mileage_text(repair)
-    has_mileage = repair.get("km") is not None or repair.get("carried_km") is not None
-    flow.append(paragraph(f"{mileage} км" if has_mileage else "Пробег не указан"))
+        filter(
+            None, (vehicle["plate"], vehicle["vin"].lower(), vehicle["model"] or vehicle["make"])
+        )
+    )
+    visit = repair["visit_date"]
+    mileage = "Пробег не указан"
+    if repair.get("km") is not None:
+        marker = " (?)" if not repair.get("verified", True) else ""
+        mileage = f"{repair['km']}км{marker}"
     if repair.get("carried_km") is not None:
-        flow.append(paragraph("Последний известный пробег; новый замер не указан."))
+        mileage = f"{mileage_text(repair)} км"
+    flow = [
+        paragraph(name or "Автомобиль не указан"),
+        Spacer(1, LINE_HEIGHT),
+        paragraph(date.fromisoformat(visit).strftime("%d.%m.%y") if visit else "Не указана"),
+        paragraph(mileage),
+    ]
+    if repair.get("carried_km") is not None:
+        flow.append(paragraph("Последний известный пробег. Новый замер не указан."))
+    flow.append(Spacer(1, LINE_HEIGHT))
     for line in (data["description"] or "Работы не указаны").splitlines():
         flow.append(paragraph(line or "\u00a0"))
     recommendations = data.get("recommendations", "").strip()
@@ -62,31 +117,39 @@ def build_service_sheet(document: dict) -> bytes:
         flow.append(paragraph("рекомендации:", bold))
         for line in recommendations.splitlines():
             flow.append(paragraph(line or "\u00a0"))
-    # Полоса идёт за текстом, как в оригинале, а не привязана к низу страницы.
-    # Последний абзац остаётся с полосой, чтобы не возникала пустая последняя страница.
+    # Последняя строка остаётся с полосой, которая идёт за текстом.
     flow[-1].keepWithNext = True
-    flow.append(Spacer(1, 16))
+    flow.append(Spacer(1, 15.45))
     flow[-1].keepWithNext = True
-    flow.append(Image(str(ASSETS / "footer.png"), width=485, height=28))
+    flow.append(ServiceSheetBand())
 
     def header(canvas, doc):
         canvas.saveState()
-        canvas.drawImage(str(ASSETS / "header.png"), 85, A4[1] - 160, width=462, height=75.5)
+        draw_foltz_header(canvas)
         if doc.page > 1:
             canvas.setFont("Receipt", 9)
-            canvas.drawRightString(552, 30, f"{document['number']} · Страница {doc.page}")
+            canvas.drawRightString(
+                TEXT_LEFT + BODY_WIDTH, 30, f"{document['number']} · Страница {doc.page}"
+            )
         canvas.restoreState()
 
     stream = BytesIO()
-    template = SimpleDocTemplate(
+    template = BaseDocTemplate(
         stream,
-        pagesize=A4,
-        leftMargin=67,
-        rightMargin=A4[0] - 552,
-        topMargin=224,
-        bottomMargin=45,
+        pagesize=FOLTZ_PAGE,
         title=f"Сервисный лист {document['number']}",
         author="Фольц Мастер",
     )
-    template.build(flow, onFirstPage=header, onLaterPages=header)
+    frame = Frame(
+        TEXT_LEFT,
+        BOTTOM_MARGIN,
+        BODY_WIDTH,
+        FIRST_BASELINE + BODY_SIZE - BOTTOM_MARGIN,
+        topPadding=0,
+        bottomPadding=0,
+        leftPadding=0,
+        rightPadding=0,
+    )
+    template.addPageTemplates(PageTemplate(id="service_sheet", frames=[frame], onPage=header))
+    template.build(flow)
     return stream.getvalue()
