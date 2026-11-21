@@ -11,9 +11,10 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import BaseDocTemplate, Flowable, Frame, PageTemplate, Paragraph, Spacer
 
+from app.services.documents import item_total_label, quantity_text
 from app.services.foltz_pdf import FOLTZ_PAGE, draw_foltz_header
 from app.services.receipt_pdf import register_fonts
-from app.services.records import mileage_text
+from app.services.records import amount_text, mileage_text
 
 TEXT_LEFT = 67.104
 FIRST_BASELINE = 622.06
@@ -117,6 +118,26 @@ def build_service_sheet(document: dict) -> bytes:
         flow.append(paragraph("рекомендации:", bold))
         for line in recommendations.splitlines():
             flow.append(paragraph(line or "\u00a0"))
+    if data["items"]:
+        for kind, title in (("part", "Запчасти"), ("work", "Работы")):
+            items = [item for item in data["items"] if item["kind"] == kind]
+            if not items:
+                continue
+            flow.append(Spacer(1, LINE_HEIGHT / 2))
+            flow.append(paragraph(title, bold))
+            for item in items:
+                quantity = quantity_text(item["quantity_milli"])
+                if item["unit_price_kopecks"] is None:
+                    details = f"кол-во {quantity}"
+                else:
+                    unit_price = amount_text(item["unit_price_kopecks"])
+                    total = amount_text(item["total_kopecks"])
+                    details = f"{quantity} × {unit_price} ₽ = {total} ₽"
+                flow.append(paragraph(f"{item['title']} · {details}"))
+        if data["total_kopecks"] is not None:
+            flow.append(Spacer(1, LINE_HEIGHT / 2))
+            caption = item_total_label(data["items"])
+            flow.append(paragraph(f"{caption}: {amount_text(data['total_kopecks'])} ₽", bold))
     # Последняя строка остаётся с полосой, которая идёт за текстом.
     flow[-1].keepWithNext = True
     flow.append(Spacer(1, 15.45))

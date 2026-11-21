@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.services.documents import Documents, TotalMismatch, normalize_items
+from app.services.documents import Documents, TotalMismatch, item_price_total, normalize_items
 from app.services.receipt_pdf import pdf_bytes, save_pdf
 from app.services.records import amount_text
 from app.ui.vehicles import ERRORS, SafeDialog, plain_label, primary_button
@@ -151,8 +151,7 @@ class DocumentDialog(SafeDialog):
         left.setContentsMargins(0, 0, 8, 0)
         self.kind = QComboBox()
         self.kind.addItem("Старый формат: сервисный лист «Фольц Мастер»", "service_sheet")
-        self.kind.addItem("Новый формат: простая квитанция", "simple")
-        self.kind.addItem("Новый формат: запчасти и работы", "detailed")
+        self.kind.addItem("Новый формат: квитанция", "receipt")
         self.kind.currentIndexChanged.connect(self.changed)
         left.addWidget(self.kind)
         left.addWidget(plain_label("Описание для документа"))
@@ -167,6 +166,7 @@ class DocumentDialog(SafeDialog):
         self.recommendations.setPlaceholderText(
             "Необязательно. Сохраняются в черновике и документе."
         )
+        self.recommendations.setMaximumHeight(self.recommendations.minimumSizeHint().height())
         self.recommendations.textChanged.connect(self.changed)
         recommendations_layout.addWidget(self.recommendations)
         recommendations_layout.addWidget(
@@ -176,6 +176,7 @@ class DocumentDialog(SafeDialog):
         self.items_panel = QWidget()
         positions = QVBoxLayout(self.items_panel)
         positions.setContentsMargins(0, 0, 0, 0)
+        positions.addWidget(plain_label("Цена необязательна"))
         self.item_tables = {}
         self.item_subtotals = {}
         for kind, heading, add_text, shortcut in (
@@ -277,7 +278,7 @@ class DocumentDialog(SafeDialog):
         self.history.blockSignals(True)
         self.history.clear()
         for document in documents:
-            kind = "Простая" if document["kind"] == "simple" else "Подробная"
+            kind = "Квитанция"
             if document["number"].startswith("СЛ-"):
                 kind = "Сервисный лист"
             stamp = datetime.fromisoformat(document["created_at"]).strftime("%d.%m.%Y %H:%M")
@@ -380,18 +381,15 @@ class DocumentDialog(SafeDialog):
                 "items": [],
             }
             values = with_repair
-        selected_kind = (
-            "service_sheet" if values.get("layout") == "service_sheet" else values["kind"]
-        )
-        self.kind.setCurrentIndex(max(0, self.kind.findData(selected_kind)))
+        selected_layout = values.get("layout", "receipt")
+        self.kind.setCurrentIndex(max(0, self.kind.findData(selected_layout)))
         self.description.setPlainText(values["description"])
         self.recommendations.setPlainText(values.get("recommendations", ""))
         for table in self.item_tables.values():
             table.setRowCount(0)
         for row in values["items"]:
             self.add_item(row.get("kind", "work"), values=row)
-        self.items_panel.setVisible(values["kind"] == "detailed")
-        self.recommendations_panel.setVisible(selected_kind == "service_sheet")
+        self.recommendations_panel.setVisible(selected_layout == "service_sheet")
         self.original = self.state()
         self.busy = False
         self.update_total()
@@ -426,8 +424,10 @@ class DocumentDialog(SafeDialog):
         with QSignalBlocker(table):
             table.insertRow(row)
             for column, field in enumerate(ITEM_FIELDS):
-                value = defaults[field] if values is None else values[field]
-                table.setItem(row, column, QTableWidgetItem(value))
+                value = defaults[field] if values is None else values.get(field, defaults[field])
+                table.setItem(
+                    row, column, QTableWidgetItem(str(value) if value is not None else "")
+                )
         if values is None:
             table.setFocus()
             table.setCurrentCell(row, 0)
@@ -449,57 +449,54 @@ class DocumentDialog(SafeDialog):
 
     def item_rows(self, kind):
         table = self.item_tables[kind]
-        return [
-            {"kind": kind}
-            | {field: table.item(row, col).text() for col, field in enumerate(ITEM_FIELDS)}
-            for row in range(table.rowCount())
-        ]
+        result = []
+        for row in range(table.rowCount()):
+            fields = {field: table.item(row, col).text() for col, field in enumerate(ITEM_FIELDS)}
+            # «Добавить строку» оставляет количество 1 даже у пустой позиции.
+            if (
+                fields["title"].strip()
+                or fields["price"].strip()
+                or fields["quantity"].strip()
+                not in (
+                    "",
+                    "1",
+                )
+            ):
+                result.append({"kind": kind} | fields)
+        return result
 
     def state(self):
+        items = [row for kind in self.item_tables for row in self.item_rows(kind)]
         return {
-            "kind": "simple"
-            if self.kind.currentData() == "service_sheet"
-            else self.kind.currentData(),
-            "layout": "service_sheet" if self.kind.currentData() == "service_sheet" else "receipt",
+            "kind": "detailed" if items else "simple",
+            "layout": self.kind.currentData(),
             "recommendations": self.recommendations.toPlainText(),
             "description": self.description.toPlainText(),
-            "items": [row for kind in self.item_tables for row in self.item_rows(kind)],
+            "items": items,
         }
 
     def update_total(self):
-        if self.kind.currentData() == "service_sheet":
-            self.total.setText("Сервисный лист без стоимости работ и запчастей")
-            return
-        if self.kind.currentData() == "simple":
-            value = amount_text(
-                self.current_document["payload"]["total_kopecks"]
-                if self.current_document
-                else self.source_repair()["amount_kopecks"]
-            )
-            self.total.setText(f"Итог: {value + ' ₽' if value else 'стоимость не указана'}")
-        else:
-            rows = []
-            for kind, label in self.item_subtotals.items():
-                group = self.item_rows(kind)
-                rows.extend(group)
-                try:
-                    items = normalize_items(group) if group else []
-                    subtotal = amount_text(sum(item["total_kopecks"] for item in items))
-                    label.setText(f"{subtotal} ₽")
-                except ValueError:
-                    label.setText("Заполните позиции")
+        rows = []
+        for kind, label in self.item_subtotals.items():
+            group = self.item_rows(kind)
+            rows.extend(group)
             try:
-                items = normalize_items(rows)
-                self.total.setText(
-                    f"Итог позиций: {amount_text(sum(row['total_kopecks'] for row in items))} ₽"
-                )
-            except ValueError as error:
-                self.total.setText(str(error))
+                subtotal = item_price_total(normalize_items(group)) if group else None
+                label.setText("" if subtotal is None else f"{amount_text(subtotal)} ₽")
+            except ValueError:
+                label.setText("Проверьте позиции")
+        try:
+            items = normalize_items(rows) if rows else []
+            total = item_price_total(items)
+            missing_prices = any(item["unit_price_kopecks"] is None for item in items)
+            caption = "Итог по указанным ценам" if missing_prices else "Итог позиций"
+            self.total.setText("" if total is None else f"{caption}: {amount_text(total)} ₽")
+        except ValueError as error:
+            self.total.setText(str(error))
 
     def changed(self, *_):
         if self.busy:
             return
-        self.items_panel.setVisible(self.kind.currentData() == "detailed")
         self.recommendations_panel.setVisible(self.kind.currentData() == "service_sheet")
         self.clear_preview("Обновляем предпросмотр…")
         self.document_status.setText("Черновик")

@@ -23,6 +23,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from app.services.documents import item_total_label, quantity_text
 from app.services.foltz_pdf import FOLTZ_PAGE, draw_foltz_header
 from app.services.records import amount_text, mileage_text
 
@@ -128,28 +129,30 @@ def build_pdf(document: dict) -> bytes:
         flow.append(paragraph(line or " "))
     if document["kind"] == "detailed":
         flow.append(paragraph("Работы и запчасти", section))
-        rows = [
-            [
-                paragraph(value, small)
-                for value in ("Тип", "Наименование", "Кол-во", "Цена, ₽", "Сумма, ₽")
-            ]
-        ]
+        has_prices = data["total_kopecks"] is not None
+        headers = ["Тип", "Наименование", "Кол-во"]
+        widths = [20 * mm, 136 * mm, 18 * mm]
+        if has_prices:
+            headers.extend(("Цена, ₽", "Сумма, ₽"))
+            widths = [20 * mm, 83 * mm, 18 * mm, 25 * mm, 28 * mm]
+        rows = [[paragraph(value, small) for value in headers]]
         for item in data["items"]:
-            quantity = (
-                f"{item['quantity_milli'] / 1000:.3f}".rstrip("0").rstrip(".").replace(".", ",")
-            )
-            rows.append(
-                [
-                    paragraph("Работа" if item["kind"] == "work" else "Запчасть", small),
-                    paragraph(item["title"]),
-                    paragraph(quantity, right),
-                    paragraph(amount_text(item["unit_price_kopecks"]), right),
-                    paragraph(amount_text(item["total_kopecks"]), right),
-                ]
-            )
+            row = [
+                paragraph("Работа" if item["kind"] == "work" else "Запчасть", small),
+                paragraph(item["title"]),
+                paragraph(quantity_text(item["quantity_milli"]), right),
+            ]
+            if has_prices:
+                row.extend(
+                    (
+                        paragraph(amount_text(item["unit_price_kopecks"]), right),
+                        paragraph(amount_text(item["total_kopecks"]), right),
+                    )
+                )
+            rows.append(row)
         table = LongTable(
             rows,
-            colWidths=[20 * mm, 83 * mm, 18 * mm, 25 * mm, 28 * mm],
+            colWidths=widths,
             repeatRows=1,
             splitInRow=1,
         )
@@ -168,16 +171,12 @@ def build_pdf(document: dict) -> bytes:
             )
         )
         flow.append(table)
-    total = amount_text(data["total_kopecks"])
-    flow.append(
-        KeepTogether(
-            [
-                Spacer(1, 7 * mm),
-                paragraph(f"Итого: {total + ' ₽' if total else 'стоимость не указана'}", heading),
-                paragraph("Получение оплаты этой записью не подтверждается.", small),
-            ]
-        )
-    )
+        if has_prices:
+            total = amount_text(data["total_kopecks"])
+            caption = item_total_label(data["items"])
+            flow.append(
+                KeepTogether([Spacer(1, 7 * mm), paragraph(f"{caption}: {total} ₽", heading)])
+            )
 
     def footer(canvas, doc):
         canvas.saveState()

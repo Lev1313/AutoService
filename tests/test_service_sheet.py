@@ -1,5 +1,7 @@
+import pytest
 from PySide6.QtCore import QBuffer, QIODevice, QRect, QSize
 from PySide6.QtPdf import QPdfDocument
+from PySide6.QtWidgets import QLabel
 
 from app.database.connection import initialize_database
 from app.services.documents import Documents
@@ -148,4 +150,49 @@ def test_sheet_draft_reopen_issue_and_history(application, tmp_path):
     assert archived.kind.currentData() == "service_sheet"
     assert not archived.recommendations.isEnabled()
     assert "Сервисный лист" in archived.history.currentText()
+    archived.reject()
+
+
+@pytest.mark.parametrize("layout", ["service_sheet", "receipt"])
+def test_document_prices_are_optional_and_survive_draft_and_issue(application, tmp_path, layout):
+    records, service, _, repair = setup_repair(tmp_path)
+    dialog = DocumentDialog(records, repair)
+    assert [dialog.kind.itemData(i) for i in range(dialog.kind.count())] == [
+        "service_sheet",
+        "receipt",
+    ]
+    dialog.kind.setCurrentIndex(dialog.kind.findData(layout))
+    assert not dialog.items_panel.isHidden()
+    assert any(label.text() == "Цена необязательна" for label in dialog.findChildren(QLabel))
+    dialog.add_item("part", values={"title": "Фильтр <тест>", "quantity": "2", "price": ""})
+    dialog.add_item("part", values={"title": "", "quantity": "1", "price": ""})
+    dialog.add_item("work", values={"title": "Замена фильтра", "quantity": "1,25", "price": ""})
+    dialog.preview()
+    text = dialog.pdf.getAllText(0).text()
+    assert "Фильтр <тест>" in text and "Замена фильтра" in text
+    assert "Итого" not in text and "₽" not in text and "Цена, ₽" not in text
+    assert len(dialog.state()["items"]) == 2
+
+    dialog.item_tables["part"].item(0, 2).setText("100,01")
+    assert dialog.save(close=False)
+    dialog.reject()
+
+    reopened = DocumentDialog(records, repair)
+    assert reopened.kind.currentData() == layout
+    assert reopened.item_tables["work"].item(0, 2).text() == ""
+    text = reopened.pdf.getAllText(0).text()
+    assert text.index("Фильтр <тест>") < text.index("Замена фильтра")
+    assert "100,01" in text and "200,02" in text
+    assert "Итого по указанным ценам" in text
+    assert "Получение оплаты" not in text
+    assert reopened.create()
+    original = reopened.content
+    assert reopened.current_document["payload"]["total_kopecks"] == 20002
+    assert service.draft(repair) is None
+    reopened.reject()
+
+    archived = DocumentDialog(records, repair)
+    assert archived.content == original
+    assert archived.item_tables["work"].item(0, 2).text() == ""
+    assert not archived.items_panel.isEnabled()
     archived.reject()

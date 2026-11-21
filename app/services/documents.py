@@ -30,6 +30,24 @@ def quantity_milli(text: str) -> int:
     return int(value * 1000)
 
 
+def quantity_text(milli: int) -> str:
+    whole, fraction = divmod(milli, 1000)
+    return f"{whole},{fraction:03d}".rstrip("0") if fraction else str(whole)
+
+
+def item_price_total(items):
+    amounts = [item["total_kopecks"] for item in items if item["total_kopecks"] is not None]
+    return sum(amounts) if amounts else None
+
+
+def item_total_label(items):
+    return (
+        "Итого"
+        if all(item["unit_price_kopecks"] is not None for item in items)
+        else "Итого по указанным ценам"
+    )
+
+
 def normalize_items(rows: list[dict]) -> list[dict]:
     result = []
     for index, row in enumerate(rows, 1):
@@ -40,10 +58,12 @@ def normalize_items(rows: list[dict]) -> list[dict]:
         if kind not in ("work", "part"):
             raise ValueError("Выберите работу или запчасть.")
         quantity = quantity_milli(str(row.get("quantity", "")))
-        price = parse_amount(str(row.get("price", "")))
-        if price is None:
-            raise ValueError(f"Строка {index}: укажите цену; 0 означает бесплатно.")
-        total = int((Decimal(price) * quantity / 1000).quantize(Decimal(1), rounding=ROUND_HALF_UP))
+        raw_price = row.get("price")
+        price = parse_amount(str(raw_price)) if raw_price is not None else None
+        total = None
+        if price is not None:
+            amount = Decimal(price) * quantity / 1000
+            total = int(amount.quantize(Decimal(1), rounding=ROUND_HALF_UP))
         result.append(
             {
                 "kind": kind,
@@ -54,8 +74,8 @@ def normalize_items(rows: list[dict]) -> list[dict]:
             }
         )
     if not result:
-        raise ValueError("Добавьте хотя бы одну позицию для подробной квитанции.")
-    if sum(row["total_kopecks"] for row in result) > 99_999_999_999:
+        raise ValueError("Добавьте хотя бы одну запчасть или работу.")
+    if (item_price_total(result) or 0) > 99_999_999_999:
         raise ValueError("Итог позиций превышает допустимую сумму.")
     return result
 
@@ -117,8 +137,6 @@ class Documents:
             raise ValueError("Выберите формат квитанции.")
         if layout not in ("receipt", "service_sheet"):
             raise ValueError("Выберите шаблон документа.")
-        if layout == "service_sheet" and kind != "simple":
-            raise ValueError("Сервисный лист использует описание работ без ценовых позиций.")
         normalized = normalize_items(items or []) if kind == "detailed" else []
         with connect(self.path) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -139,13 +157,10 @@ class Documents:
                 LEFT JOIN contacts c ON c.id=v.contact_id WHERE v.id=?""",
                 (repair["vehicle_id"],),
             ).fetchone()
-            total = (
-                repair["amount_kopecks"]
-                if kind == "simple"
-                else sum(row["total_kopecks"] for row in normalized)
-            )
+            total = repair["amount_kopecks"] if kind == "simple" else item_price_total(normalized)
             mismatch = (
                 kind == "detailed"
+                and all(item["unit_price_kopecks"] is not None for item in normalized)
                 and repair["amount_kopecks"] is not None
                 and total != repair["amount_kopecks"]
             )

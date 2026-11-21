@@ -161,7 +161,6 @@ def test_detailed_items_exact_rounding_and_total_confirmation(data):
     "item",
     [
         {"title": ""},
-        {"title": "Работа", "quantity": "1", "price": ""},
         {"title": "Работа", "quantity": "0", "price": "0"},
         {"title": "Работа", "quantity": "NaN", "price": "1"},
         {"title": "Работа", "quantity": "1.0001", "price": "1"},
@@ -185,21 +184,24 @@ def test_preview_does_not_reserve_number_and_incomplete_draft_survives(data):
     assert service.draft(repair) == draft
 
 
-def test_pdf_cyrillic_unknown_vs_zero_and_atomic_export(application, data, tmp_path):
-    records, service, car, repair = data
+def test_pdf_cyrillic_optional_prices_and_atomic_export(application, data, tmp_path):
+    _, service, _, repair = data
     content = pdf_bytes(service.create(repair))
     pdf, buffer = load_pdf(content)
     text = pdf.getAllText(0).text()
     assert "Квитанция" in text
     assert "тест 123" in text
-    assert "1500,50" in text
+    assert "Итого" not in text and "1500,50" not in text
     assert "не разметка" in text
+    assert "Получение оплаты" not in text
     pdf.close()
     buffer.close()
-    records.save_repair(car, records.repairs(car)[0] | {"amount_kopecks": None}, repair)
-    unknown, buffer = load_pdf(pdf_bytes(service.create(repair)))
-    assert "стоимость не указана" in unknown.getAllText(0).text()
-    unknown.close()
+    items = [{"title": "Бесплатная работа", "quantity": "1", "price": "0"}]
+    free, buffer = load_pdf(
+        pdf_bytes(service.create(repair, "detailed", items, allow_difference=True))
+    )
+    assert "Итого: 0,00 ₽" in free.getAllText(0).text()
+    free.close()
     buffer.close()
     target = tmp_path / "receipt.pdf"
     save_pdf(content, target)
@@ -223,6 +225,7 @@ def test_long_description_and_table_span_pages_with_end_preserved(application, d
     assert "НАЧАЛО ЗАПИСИ" in text and "КОНЕЦ ЗАПИСИ" in text
     assert "Позиция 99" in text
     assert "1000,00" in text
+    assert "Получение оплаты" not in text
     assert f"Страница {pdf.pageCount()}" in text
     pdf.close()
     buffer.close()
@@ -411,7 +414,7 @@ def test_issue_and_print_cancel_keeps_number(application, data, monkeypatch):
     monkeypatch.setattr(documents_ui, "QPrintDialog", CancelPrintDialog)
     dialog = DocumentDialog(records, repair)
     assert service.history(repair) == []
-    dialog.kind.setCurrentIndex(dialog.kind.findData("simple"))
+    dialog.kind.setCurrentIndex(dialog.kind.findData("receipt"))
     QTest.qWait(dialog.preview_timer.interval() + 100)
     dialog.print_button.click()
     assert not warnings
