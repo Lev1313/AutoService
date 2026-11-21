@@ -343,12 +343,9 @@ def reopen(root, report):
         window.theme_select.setCurrentIndex(window.theme_select.findData("light"))
 
         help_dialog = HelpDialog(window)
-        check(help_dialog.tabs.count() == 2, "Только инструкция в приложении")
-        for index in range(2):
-            check(
-                len(help_dialog.tabs.widget(index).toPlainText()) > 500,
-                "Инструкция в комплекте EXE",
-            )
+        guide = help_dialog.guide.toPlainText()
+        check("Завершить ремонт" in guide, "Инструкция в комплекте EXE")
+        check("демонстрац" not in guide.casefold(), "Инструкция для обычной работы")
         help_dialog.show()
         QTest.qWait(200)
         check(help_dialog.grab().save(str(root / "help-window.png")), "Снимок инструкции")

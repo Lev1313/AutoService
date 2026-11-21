@@ -1,36 +1,23 @@
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QTabWidget
 
 from app.bootstrap import create_window
 from app.services.paths import database_path
 from app.services.records import Records
 from app.ui.help import HelpDialog
+from main import main
 
 
-def test_demo_is_separate_persistent_and_does_not_touch_working_database(
-    application, tmp_path, monkeypatch
-):
+def test_removed_demo_argument_cannot_open_working_database(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    working = create_window()
-    work_car = working.records.save_vehicle({"plate": "РАБОЧАЯ"})
-    before = database_path().read_bytes()
-    demo = create_window(demo=True)
-    try:
-        assert demo.db_path != working.db_path
-        assert demo.records.vehicles() == []
-        assert "демонстрационный режим" in demo.windowTitle()
-        demo.records.save_vehicle({"plate": "ПРОБНАЯ"})
-        assert database_path().read_bytes() == before
-        assert working.records.vehicles()[0]["id"] == work_car
-        demo.close()
-        reopened = create_window(demo=True)
-        assert reopened.records.vehicles()[0]["plate"] == "ПРОБНАЯ"
-        reopened.close()
-    finally:
-        demo.close()
-        working.close()
+    monkeypatch.setattr(sys, "argv", ["AutoService", "--demo"])
+    assert main() == 2
+    assert not database_path().exists()
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_pilot_keyboard_help_and_selection_survive_navigation(application, tmp_path):
@@ -65,14 +52,13 @@ def test_pilot_keyboard_help_and_selection_survive_navigation(application, tmp_p
         QTest.keyClick(window, Qt.Key.Key_5, Qt.KeyboardModifier.ControlModifier)
         assert window.navigation.currentItem().text() == "Настройки"
         before = Path(window.db_path).read_bytes()
-        captured = []
+        captured = {}
 
         def inspect_help():
             dialog = application.activeModalWidget()
             if isinstance(dialog, HelpDialog):
-                captured.extend(
-                    dialog.tabs.widget(i).toPlainText() for i in range(dialog.tabs.count())
-                )
+                captured["guide"] = dialog.guide.toPlainText()
+                captured["has_tabs"] = bool(dialog.findChildren(QTabWidget))
                 dialog.reject()
 
         QTimer.singleShot(100, inspect_help)
@@ -84,10 +70,11 @@ def test_pilot_keyboard_help_and_selection_survive_navigation(application, tmp_p
         watchdog.start(2000)
         QTest.keyClick(window, Qt.Key.Key_F1)
         watchdog.stop()
-        assert len(captured) == 2
-        assert "Добавить автомобиль" in captured[0]
-        assert "Завершить ремонт" in captured[1]
-        assert all("вопросы механику" not in text.casefold() for text in captured)
+        assert not captured["has_tabs"]
+        guide = captured["guide"]
+        assert "Добавить автомобиль" in guide
+        assert "Завершить ремонт" in guide
+        assert "демонстрац" not in guide.casefold()
         assert Path(window.db_path).read_bytes() == before
         assert len(Records(window.db_path).vehicles()) == 2
     finally:

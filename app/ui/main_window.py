@@ -66,11 +66,9 @@ class NavigationDelegate(QStyledItemDelegate):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, db_path: Path, *, demo: bool = False) -> None:
+    def __init__(self, db_path: Path) -> None:
         super().__init__()
         self.setWindowTitle("АвтоСервис — учёт автомобилей и ремонтов")
-        if demo:
-            self.setWindowTitle(self.windowTitle() + " — демонстрационный режим")
         self.resize(1100, 720)
         self.setMinimumSize(800, 540)
         self.db_path = db_path
@@ -96,8 +94,6 @@ class MainWindow(QMainWindow):
         brand.addWidget(logo)
         brand.addWidget(label("АвтоСервис", "brand"), 1)
         side_layout.addLayout(brand)
-        if demo:
-            side_layout.addWidget(label("Демонстрационный режим. Отдельные данные.", "muted", True))
         side_layout.addSpacing(24)
         self.navigation = QListWidget()
         self.navigation.setObjectName("navigation")

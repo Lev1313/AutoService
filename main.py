@@ -4,13 +4,17 @@ import sys
 
 
 def main() -> int:
-    if len(sys.argv) > 1 and sys.argv[1].startswith("--self-test"):
+    args = sys.argv[1:]
+    if args and args[0] in ("--self-test", "--self-test-reopen"):
         from app.diagnostics import command
 
-        return command(sys.argv[1:])
+        return command(args)
+    if args:
+        return 2
+
     from app.bootstrap import run
 
-    return run(demo=sys.argv[1:] == ["--demo"])
+    return run()
 
 
 if __name__ == "__main__":

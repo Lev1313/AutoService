@@ -1,6 +1,6 @@
 # Архитектура AutoService
 
-Текущее состояние — выпуск 0.5.9 и ветка `main`. Схема SQLite v7.
+Текущее состояние — выпуск 0.5.10 и ветка `main`. Схема SQLite v7.
 
 ## Компоненты
 
@@ -29,10 +29,9 @@ Python 3.13 x64 использовался для проверок и Windows-с
 | `document_settings`, `document_drafts`, `documents`, `document_files` | Реквизиты, черновики, неизменяемые снимки и оформленные PDF с контрольными суммами. |
 | `import_sources`, `import_paths`, `import_fragments`, `import_batches` | Исходные байты и декодированный текст, происхождение, диапазоны, связи и отчёты импорта. |
 
-Рабочая база находится в `%LOCALAPPDATA%/AutoService/autoservice.sqlite3`,
-демонстрационная — в `%LOCALAPPDATA%/AutoService-Demo/autoservice.sqlite3`.
-Предпочтение темы и дата последней ручной копии хранятся через `QSettings`
-в `.ini` рядом с базой соответствующего режима.
+Рабочая база находится в `%LOCALAPPDATA%/AutoService/autoservice.sqlite3`.
+Предпочтение темы и дата последней ручной копии хранятся через `QSettings` в `.ini`
+рядом с базой.
 
 ## Сохранность данных
 
@@ -69,7 +68,7 @@ ReportLab формирует A4, QtPdf показывает полученный
 и поиск по прежним написаниям BMW и Mercedes-Benz. Выбор подсказки сохраняет новое
 название только после подтверждения в карточке. [Сведения об источнике](VEHICLE-CATALOG.md).
 
-ZIP [v0.5.9](https://github.com/Lev1313/AutoService/releases/tag/v0.5.9) включает Qt,
+ZIP [v0.5.10](https://github.com/Lev1313/AutoService/releases/tag/v0.5.10) включает Qt,
 Python, ассеты, справку и PDF-руководство. При проверке EXE форма автомобиля ищет
 марки и модели по известным прежним написаниям и возвращает английские названия.
 [Порядок сборки и проверок](WINDOWS-RELEASE.md).

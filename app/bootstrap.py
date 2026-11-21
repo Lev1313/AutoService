@@ -29,10 +29,10 @@ def create_application(argv: list[str] | None = None) -> QApplication:
     return application
 
 
-def create_window(path: Path | None = None, *, demo: bool = False) -> MainWindow:
-    path = database_path(demo=demo) if path is None else path
+def create_window(path: Path | None = None) -> MainWindow:
+    path = database_path() if path is None else path
     initialize_database(path)
-    return MainWindow(path, demo=demo)
+    return MainWindow(path)
 
 
 def acquire_data_lock(path: Path) -> QLockFile:
@@ -47,12 +47,12 @@ def acquire_data_lock(path: Path) -> QLockFile:
     return lock
 
 
-def run(*, demo: bool = False) -> int:
+def run() -> int:
     application = create_application()
-    path = database_path(demo=demo)
+    path = database_path()
     try:
         lock = acquire_data_lock(path)
-        window = create_window(path, demo=demo)
+        window = create_window(path)
     except (OSError, sqlite3.Error, RuntimeError) as error:
         QMessageBox.critical(
             None,

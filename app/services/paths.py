@@ -11,8 +11,5 @@ def data_directory() -> Path:
     return base / "AutoService"
 
 
-def database_path(*, demo: bool = False) -> Path:
-    directory = data_directory()
-    if demo:
-        directory = directory.with_name("AutoService-Demo")
-    return directory / "autoservice.sqlite3"
+def database_path() -> Path:
+    return data_directory() / "autoservice.sqlite3"

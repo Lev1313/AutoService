@@ -1,6 +1,6 @@
 [project]
 name = "autoservice"
-version = "0.5.9"
+version = "0.5.10"
 description = "Офлайн-программа для небольшого автосервиса"
 requires-python = ">=3.13,<3.15"
 

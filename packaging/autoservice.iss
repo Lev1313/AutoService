@@ -43,10 +43,13 @@ Source: "{#BundleDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 [InstallDelete]
 Type: files; Name: "{app}\Показ механику.cmd"
 Type: files; Name: "{group}\Показ механику (отдельные данные).lnk"
+Type: files; Name: "{app}\Демонстрационный режим.cmd"
+Type: files; Name: "{app}\Как провести показ.txt"
+Type: files; Name: "{app}\Быстрый старт.txt"
+Type: files; Name: "{group}\Демонстрационный режим.lnk"
 
 [Icons]
 Name: "{group}\AutoService"; Filename: "{app}\AutoService.exe"
-Name: "{group}\Демонстрационный режим"; Filename: "{app}\AutoService.exe"; Parameters: "--demo"
 Name: "{group}\Инструкция"; Filename: "{app}\Инструкция.txt"
 Name: "{autodesktop}\AutoService"; Filename: "{app}\AutoService.exe"; Tasks: desktopicon
 

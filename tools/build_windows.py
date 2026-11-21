@@ -12,7 +12,7 @@ import tomllib
 from pathlib import Path
 
 
-def build(output: Path, compiler: Path):
+def build(output: Path, compiler: Path | None = None):
     project = Path(__file__).resolve().parents[1]
     version = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))["project"][
         "version"
@@ -86,12 +86,7 @@ def build(output: Path, compiler: Path):
     bundle = output / "dist" / "AutoService"
     if list((bundle / "_internal").glob("icu*.dll")):
         raise RuntimeError("Упаковщик захватил стороннюю ICU вместо системной. Выпуск остановлен.")
-    for source, destination in (
-        ("OWNER-GUIDE.txt", "Инструкция.txt"),
-        ("QUICK-START.txt", "Быстрый старт.txt"),
-        ("SHOW-GUIDE.txt", "Как провести показ.txt"),
-    ):
-        shutil.copy2(project / "docs" / source, bundle / destination)
+    shutil.copy2(project / "docs" / "OWNER-GUIDE.txt", bundle / "Инструкция.txt")
     subprocess.run(
         [sys.executable, "-m", "tools.make_print_guide", "--output", str(output)],
         cwd=project,
@@ -100,9 +95,6 @@ def build(output: Path, compiler: Path):
     )
     guide = output / f"AutoService-{version}-Руководство-пользователя.pdf"
     shutil.copy2(guide, bundle / "Руководство пользователя.pdf")
-    (bundle / "Демонстрационный режим.cmd").write_bytes(
-        b'@echo off\r\nstart "" "%~dp0AutoService.exe" --demo\r\n'
-    )
     shutil.copy2(project / "docs" / "THIRD-PARTY.txt", bundle / "Сторонние компоненты.txt")
     license_root = bundle / "licenses"
     license_root.mkdir()
@@ -138,16 +130,17 @@ def build(output: Path, compiler: Path):
     (bundle / "manifest-sha256.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    subprocess.run(
-        [
-            str(compiler),
-            f"/DAppVersion={version}",
-            f"/DBundleDir={bundle}",
-            f"/DReleaseDir={output}",
-            str(project / "packaging" / "autoservice.iss"),
-        ],
-        check=True,
-    )
+    if compiler is not None:
+        subprocess.run(
+            [
+                str(compiler),
+                f"/DAppVersion={version}",
+                f"/DBundleDir={bundle}",
+                f"/DReleaseDir={output}",
+                str(project / "packaging" / "autoservice.iss"),
+            ],
+            check=True,
+        )
     shutil.make_archive(
         str(output / f"AutoService-{version}-Windows-x64-portable"),
         "zip",
@@ -166,6 +159,6 @@ def build(output: Path, compiler: Path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path, help="Новый каталог выпуска")
-    parser.add_argument("--compiler", required=True, type=Path, help="Путь к Inno Setup ISCC.exe")
+    parser.add_argument("--compiler", type=Path, help="Путь к ISCC.exe для сборки Setup")
     options = parser.parse_args()
     build(options.output, options.compiler)
