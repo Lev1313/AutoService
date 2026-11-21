@@ -147,9 +147,9 @@ class DocumentDialog(SafeDialog):
         left = QVBoxLayout(editor)
         left.setContentsMargins(0, 0, 8, 0)
         self.kind = QComboBox()
+        self.kind.addItem("Фольц Мастер: сервисный лист", "service_sheet")
         self.kind.addItem("Простая: описание и общая сумма", "simple")
         self.kind.addItem("Подробная: работы и запчасти", "detailed")
-        self.kind.addItem("Фольц Мастер: сервисный лист", "service_sheet")
         self.kind.currentIndexChanged.connect(self.changed)
         left.addWidget(self.kind)
         left.addWidget(plain_label("Описание для документа"))
@@ -346,6 +346,7 @@ class DocumentDialog(SafeDialog):
             with_repair = self.service.draft(self.repair_id)
             with_repair = with_repair or {
                 "kind": "simple",
+                "layout": "service_sheet",
                 "description": self.source_repair()["description"],
                 "items": [],
             }

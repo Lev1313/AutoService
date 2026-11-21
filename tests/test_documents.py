@@ -369,6 +369,8 @@ def test_issue_and_print_cancel_keeps_number(application, data, monkeypatch):
     monkeypatch.setattr(documents_ui, "QPrintDialog", CancelPrintDialog)
     dialog = DocumentDialog(records, repair)
     assert service.history(repair) == []
+    dialog.kind.setCurrentIndex(dialog.kind.findData("simple"))
+    QTest.qWait(dialog.preview_timer.interval() + 100)
     dialog.print_button.click()
     assert not warnings
     assert opened == ["КВ-000001"]

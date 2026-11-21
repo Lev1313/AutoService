@@ -389,6 +389,14 @@ def reopen(root, report):
         check((root / "service-sheet-printed.pdf").stat().st_size > 1000, "Печать сервисного листа")
         QTest.qWait(200)
         check(dialog.grab().save(str(root / "service-sheet-window.png")), "Снимок сервисного листа")
+        dialog.new_button.click()
+        check(
+            dialog.kind.currentData() == "service_sheet", "Новый документ открывает сервисный лист"
+        )
+        check(dialog.pdf.pageCount() > 0, "Предпросмотр нового сервисного листа")
+        check("Квитанция" not in dialog.pdf.getAllText(0).text(), "Формат предпросмотра")
+        QTest.qWait(200)
+        check(dialog.grab().save(str(root / "new-document-window.png")), "Снимок черновика")
         dialog.close()
         report.update(stage="passed", schema=SCHEMA_VERSION)
     finally:

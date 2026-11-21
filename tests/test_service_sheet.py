@@ -109,7 +109,8 @@ def test_sheet_long_text_and_missing_fields(application, tmp_path):
 def test_sheet_draft_reopen_issue_and_history(application, tmp_path):
     records, service, _, repair = setup_repair(tmp_path)
     dialog = DocumentDialog(records, repair)
-    dialog.kind.setCurrentIndex(dialog.kind.findData("service_sheet"))
+    assert dialog.kind.currentData() == "service_sheet"
+    assert "Квитанция" not in dialog.pdf.getAllText(0).text()
     dialog.recommendations.setPlainText("Сохранённая рекомендация")
     dialog.save(close=False)
     dialog.reject()
