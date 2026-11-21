@@ -2,7 +2,7 @@
 
 [Lev1313/AutoService](https://github.com/Lev1313/AutoService) — закрытый репозиторий.
 Ветка разработки и ветка по умолчанию — `main`. Теги фиксируют исходники конкретных
-выпусков. [v0.5.10](https://github.com/Lev1313/AutoService/releases/tag/v0.5.10) содержит
+выпусков. [v0.5.17](https://github.com/Lev1313/AutoService/releases/tag/v0.5.17) содержит
 проверенный ZIP для Windows, PDF-руководство и SHA-256.
 
 ## Продолжить на ноутбуке

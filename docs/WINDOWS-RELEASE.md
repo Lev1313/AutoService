@@ -10,7 +10,7 @@
 
 ## Опубликованный выпуск
 
-[AutoService v0.5.10](https://github.com/Lev1313/AutoService/releases/tag/v0.5.10) содержит
+[AutoService v0.5.17](https://github.com/Lev1313/AutoService/releases/tag/v0.5.17) содержит
 переносимый ZIP для Windows x64, PDF-руководство и контрольные суммы. Для воспроизведения
 опубликованной версии используйте тег.
 
