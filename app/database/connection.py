@@ -7,7 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 SCHEMA_V2 = (
     """CREATE TABLE contacts (id INTEGER PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '')""",
@@ -212,6 +212,12 @@ def initialize_database(path: Path) -> None:
         if version < 7:
             for statement in SCHEMA_V7:
                 connection.execute(statement)
+        if 0 < version < 8:
+            connection.create_function("plate_lowercase", 1, str.lower, deterministic=True)
+            connection.execute(
+                "UPDATE vehicles SET plate = plate_lowercase(plate) "
+                "WHERE plate <> plate_lowercase(plate)"
+            )
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         validate_tables(connection)
 

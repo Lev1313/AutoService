@@ -41,12 +41,15 @@ def test_search_edit_and_reopen_preserve_car_history(records):
             "completed": True,
         },
     )
-    for query in ("шкода", "ОКТАВИЯ", "а123вв10", "testvin", "тестовый", "1234567"):
+    assert records.vehicle(car)["plate"] == "а 123 вв 10"
+    for query in ("шкода", "ОКТАВИЯ", "а123вв10", "А123ВВ10", "testvin", "тестовый", "1234567"):
         assert [row["id"] for row in records.vehicles(query)] == [car]
     changed = records.vehicle(car) | {"plate": "В456ВВ10", "contact_name": "Другой контакт"}
     records.save_vehicle(changed, car)
     initialize_database(records.path)
     reopened = Records(records.path)
+    assert reopened.vehicle(car)["plate"] == "в456вв10"
+    assert reopened.vehicle(car)["vin"] == "TESTVIN"
     assert reopened.repairs(car)[0]["id"] == repair
     assert reopened.repairs(car)[0]["description"] == "Масло\nФильтр"
     assert reopened.latest_mileage(car)["km"] == 120000
@@ -156,8 +159,8 @@ def test_backup_restore_safety_copy_and_invalid_source(records, tmp_path):
     backup = backup_database(records.path, tmp_path / "external" / "copy.sqlite3")
     records.save_vehicle(records.vehicle(car) | {"plate": "ПОСЛЕ"}, car)
     safety = restore_database(records.path, backup)
-    assert records.vehicle(car)["plate"] == "ДО"
-    assert Records(safety).vehicle(car)["plate"] == "ПОСЛЕ"
+    assert records.vehicle(car)["plate"] == "до"
+    assert Records(safety).vehicle(car)["plate"] == "после"
     original = records.path.read_bytes()
     wrong = tmp_path / "wrong.sqlite3"
     wrong.write_text("not a database", encoding="utf-8")

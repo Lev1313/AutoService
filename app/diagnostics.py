@@ -61,7 +61,7 @@ def prepare(root):
         connection.execute("PRAGMA user_version=2")
         connection.commit()
     initialize_database(path)
-    check(Records(path).vehicle(1)["plate"] == "ТЕСТ-СТАРЫЙ", "Миграция потеряла машину")
+    check(Records(path).vehicle(1)["plate"] == "тест-старый", "Миграция госномера")
     old_copy = next((root / "backups").glob("*.sqlite3"))
     with closing(sqlite3.connect(old_copy)) as connection:
         check(connection.execute("PRAGMA user_version").fetchone()[0] == 2, "Копия до миграции")
@@ -188,7 +188,7 @@ def prepare(root):
     backup = backup_database(path, root / "release-backup.sqlite3")
     records.save_vehicle(records.vehicle(car) | {"plate": "ИЗМЕНЕНО-ДЛЯ-ТЕСТА"}, car)
     restore_database(path, backup)
-    check(records.vehicle(car)["plate"] == "ТЕСТ-ПИЛОТ", "Восстановление машины")
+    check(records.vehicle(car)["plate"] == "тест-пилот", "Восстановление машины")
     check(documents.pdf_content(detailed["id"]) == content, "Восстановление PDF")
     check(importer.provenance(imported["repair_id"])["original_bytes"] == raw, "Архив TXT в копии")
     return {
@@ -219,7 +219,7 @@ def reopen(root, report):
     try:
         window.show()
         records = window.records
-        check(records.vehicle(report["car"])["plate"] == "ТЕСТ-ПИЛОТ", "Повторный запуск: машина")
+        check(records.vehicle(report["car"])["plate"] == "тест-пилот", "Повторный запуск: машина")
         check(
             next(r for r in records.repairs(report["car"]) if r["id"] == report["repair"])[
                 "amount_kopecks"

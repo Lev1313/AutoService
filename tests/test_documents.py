@@ -21,7 +21,7 @@ from app.database.connection import (
 from app.services.documents import Documents, TotalMismatch, normalize_items
 from app.services.maintenance import Maintenance
 from app.services.receipt_pdf import pdf_bytes, save_pdf
-from app.services.records import Records
+from app.services.records import Records, amount_text
 from app.ui.documents import DocumentDialog
 
 
@@ -76,8 +76,8 @@ def test_snapshots_are_immutable_and_numbers_are_unique_after_reopen(data):
     assert reopened.pdf_content(document["id"]) == original_pdf
     newer = reopened.create(repair)
     assert newer["number"] != document["number"]
-    assert newer["payload"]["vehicle"]["plate"] == "ИЗМЕНЁН"
-    assert document["payload"]["vehicle"]["plate"] == "ТЕСТ 123"
+    assert newer["payload"]["vehicle"]["plate"] == "изменён"
+    assert document["payload"]["vehicle"]["plate"] == "тест 123"
     assert document["payload"]["service"]["name"] == "Вымышленный сервис"
     assert len(reopened.history(repair)) == 2
 
@@ -191,7 +191,7 @@ def test_pdf_cyrillic_unknown_vs_zero_and_atomic_export(application, data, tmp_p
     pdf, buffer = load_pdf(content)
     text = pdf.getAllText(0).text()
     assert "Квитанция" in text
-    assert "ТЕСТ 123" in text
+    assert "тест 123" in text
     assert "1500,50" in text
     assert "не разметка" in text
     pdf.close()
@@ -330,6 +330,48 @@ def test_document_dialog_preview_save_history_and_stale_preview_guard(
     with_draft.new_button.click()
     assert with_draft.description.toPlainText() == "Редактирование второго черновика"
     with_draft.reject()
+
+
+def test_detailed_price_editor_groups_and_reopens_legacy_draft(application, data):
+    records, service, _, repair = data
+    work = {"kind": "work", "title": "Работа", "quantity": "1", "price": "800"}
+    part = {"kind": "part", "title": "Фильтр", "quantity": "2", "price": "100"}
+    service.save_draft(repair, {"kind": "detailed", "description": "Замена", "items": [work, part]})
+
+    dialog = DocumentDialog(records, repair)
+    dialog.show()
+    application.processEvents()
+    assert dialog.state()["items"] == [part, work]
+    assert dialog.item_subtotals["part"].text() == f"{amount_text(20000)} ₽"
+    assert dialog.item_subtotals["work"].text() == f"{amount_text(80000)} ₽"
+
+    QTest.keyClick(dialog, Qt.Key.Key_1, Qt.KeyboardModifier.AltModifier)
+    QTest.keyClicks(dialog.focusWidget(), "Seal")
+    QTest.keyClick(dialog.focusWidget(), Qt.Key.Key_Tab)
+    QTest.keyClick(dialog.focusWidget(), Qt.Key.Key_Tab)
+    QTest.keyClicks(dialog.focusWidget(), "125")
+    QTest.keyClick(dialog.focusWidget(), Qt.Key.Key_2, Qt.KeyboardModifier.AltModifier)
+    QTest.keyClicks(dialog.focusWidget(), "Install")
+    QTest.keyClick(dialog.focusWidget(), Qt.Key.Key_Tab)
+    QTest.keyClick(dialog.focusWidget(), Qt.Key.Key_Tab)
+    QTest.keyClicks(dialog.focusWidget(), "400")
+    QTest.keyClick(dialog.focusWidget(), Qt.Key.Key_S, Qt.KeyboardModifier.ControlModifier)
+
+    expected = [
+        part,
+        {"kind": "part", "title": "Seal", "quantity": "1", "price": "125"},
+        work,
+        {"kind": "work", "title": "Install", "quantity": "1", "price": "400"},
+    ]
+    assert dialog.state()["items"] == expected
+    assert dialog.total.text() == f"Итог позиций: {amount_text(152500)} ₽"
+    assert not dialog.isVisible()
+    assert service.draft(repair)["items"] == expected
+
+    reopened = DocumentDialog(records, repair)
+    assert reopened.state()["items"] == expected
+    assert "тест 123" in reopened.pdf.getAllText(0).text()
+    reopened.reject()
 
 
 def test_issue_and_print_cancel_keeps_number(application, data, monkeypatch):

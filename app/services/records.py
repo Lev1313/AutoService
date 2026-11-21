@@ -200,6 +200,7 @@ class Records:
     def save_vehicle(self, values: dict, vehicle_id: int | None = None) -> int:
         fields = ("make", "model", "plate", "vin", "notes")
         cleaned = {field: str(values.get(field, "")).strip() for field in fields}
+        cleaned["plate"] = cleaned["plate"].lower()
         if not any(cleaned[field] for field in ("make", "model", "plate", "vin")):
             raise ValueError("Укажите хотя бы марку, модель, госномер или VIN.")
         year = values.get("year")

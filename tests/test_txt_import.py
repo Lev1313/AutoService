@@ -155,6 +155,7 @@ def test_preview_is_read_only_and_commit_preserves_sources_and_unknowns(data):
     result = service.commit(entries(source))
     assert len(result["imported"]) == 2 and result["backup"]
     assert len(records.vehicles()) == 1
+    assert records.vehicles()[0]["plate"] == "а123вв10"
     car = records.vehicles()[0]["id"]
     repairs = records.repairs(car)
     assert len(repairs) == 2

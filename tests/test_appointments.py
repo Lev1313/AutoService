@@ -65,7 +65,7 @@ def test_calendar_row_opens_and_reopens_standard_repair(application, tmp_path, m
             opened.append(dialog.repair.get("id"))
             assert dialog.vehicle_id == vehicle_id
             assert dialog.appointment["reason"] == "Замена масла"
-            assert dialog.findChild(QLabel, "repairTitle").text() == "VW · А123ТЕ"
+            assert dialog.findChild(QLabel, "repairTitle").text() == "VW · а123те"
             if len(opened) == 2:
                 assert dialog.description.toPlainText() == ""
                 dialog.description.setPlainText("Масло заменили")
@@ -95,7 +95,7 @@ def test_calendar_row_opens_and_reopens_standard_repair(application, tmp_path, m
         page.month_button.click()
         assert page.views.currentWidget() is page.calendar
         (visit,) = page.calendar.findChildren(QPushButton, "calendarVisit")
-        assert "А123ТЕ" in visit.text()
+        assert "а123те" in visit.text()
         visit.click()
         assert opened == [None, None, repair_id, repair_id]
     finally:

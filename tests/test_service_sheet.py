@@ -54,7 +54,7 @@ def test_sheet_fields_no_prices_and_immutable_snapshot(application, tmp_path):
     assert pdf.pageCount() == 1
     text = pdf.getAllText(0).text()
     for value in (
-        "ТЕСТ 001",
+        "тест 001",
         "TESTVIN00000000001",
         "21.11.2026",
         "123 456",

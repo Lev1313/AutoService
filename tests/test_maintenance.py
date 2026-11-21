@@ -216,7 +216,7 @@ def test_v2_migration_preserves_cars_and_keeps_v2_backup(tmp_path):
         connection.execute("PRAGMA user_version=2")
         connection.commit()
     initialize_database(path)
-    assert Records(path).vehicles()[0]["plate"] == "ДО МИГРАЦИИ"
+    assert Records(path).vehicles()[0]["plate"] == "до миграции"
     with connect(path) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     backup = next((tmp_path / "backups").glob("*.sqlite3"))
@@ -225,7 +225,7 @@ def test_v2_migration_preserves_cars_and_keeps_v2_backup(tmp_path):
     with connect(path) as connection:
         connection.execute("UPDATE vehicles SET plate='ПОСЛЕ'")
     safety = restore_database(path, backup)
-    assert Records(path).vehicles()[0]["plate"] == "ДО МИГРАЦИИ"
+    assert Records(path).vehicles()[0]["plate"] == "до миграции"
     assert Records(safety).vehicles()[0]["plate"] == "ПОСЛЕ"
     with closing(sqlite3.connect(backup)) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 2

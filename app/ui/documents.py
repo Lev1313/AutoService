@@ -3,8 +3,8 @@
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QBuffer, QIODevice, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import QPageSize, QPainter
+from PySide6.QtCore import QBuffer, QIODevice, QRectF, QSignalBlocker, QSize, Qt, QTimer
+from PySide6.QtGui import QKeySequence, QPageSize, QPainter, QShortcut
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtPrintSupport import QPrintDialog, QPrinter, QPrinterInfo
@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QHeaderView,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
@@ -30,6 +31,8 @@ from app.services.documents import Documents, TotalMismatch, normalize_items
 from app.services.receipt_pdf import pdf_bytes, save_pdf
 from app.services.records import amount_text
 from app.ui.vehicles import ERRORS, SafeDialog, plain_label, primary_button
+
+ITEM_FIELDS = ("title", "quantity", "price")
 
 
 def print_pdf(document: QPdfDocument, printer: QPrinter):
@@ -149,7 +152,7 @@ class DocumentDialog(SafeDialog):
         self.kind = QComboBox()
         self.kind.addItem("Фольц Мастер: сервисный лист", "service_sheet")
         self.kind.addItem("Простая: описание и общая сумма", "simple")
-        self.kind.addItem("Подробная: работы и запчасти", "detailed")
+        self.kind.addItem("Подробная: запчасти и работы", "detailed")
         self.kind.currentIndexChanged.connect(self.changed)
         left.addWidget(self.kind)
         left.addWidget(plain_label("Описание для документа"))
@@ -173,23 +176,49 @@ class DocumentDialog(SafeDialog):
         self.items_panel = QWidget()
         positions = QVBoxLayout(self.items_panel)
         positions.setContentsMargins(0, 0, 0, 0)
-        self.items = QTableWidget(0, 4)
-        self.items.setHorizontalHeaderLabels(("Тип", "Наименование", "Кол-во", "Цена, ₽"))
-        self.items.horizontalHeader().setStretchLastSection(True)
-        self.items.setColumnWidth(0, 95)
-        self.items.setColumnWidth(1, 180)
-        self.items.setColumnWidth(2, 65)
-        self.items.itemChanged.connect(self.changed)
-        positions.addWidget(self.items, 1)
-        buttons = QHBoxLayout()
-        self.add_button = QPushButton("Добавить позицию")
-        self.add_button.clicked.connect(self.add_item)
-        buttons.addWidget(self.add_button)
-        remove = QPushButton("Убрать позицию")
-        remove.clicked.connect(self.remove_item)
-        buttons.addWidget(remove)
-        positions.addLayout(buttons)
-        left.addWidget(self.items_panel, 1)
+        self.item_tables = {}
+        self.item_subtotals = {}
+        for kind, heading, add_text, shortcut in (
+            ("part", "Запчасти", "Добавить запчасть", "Alt+1"),
+            ("work", "Работы", "Добавить работу", "Alt+2"),
+        ):
+            summary = QHBoxLayout()
+            label = plain_label(heading)
+            font = label.font()
+            font.setBold(True)
+            label.setFont(font)
+            summary.addWidget(label)
+            summary.addStretch()
+            self.item_subtotals[kind] = plain_label("")
+            summary.addWidget(self.item_subtotals[kind])
+            positions.addLayout(summary)
+
+            table = QTableWidget(0, len(ITEM_FIELDS))
+            table.setAccessibleName(heading)
+            table.setHorizontalHeaderLabels(("Наименование", "Кол-во", "Цена, ₽"))
+            table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+            table.setColumnWidth(1, 72)
+            table.setColumnWidth(2, 96)
+            table.itemChanged.connect(self.changed)
+            self.item_tables[kind] = table
+            positions.addWidget(table, 1)
+
+            buttons = QHBoxLayout()
+            add = QPushButton(add_text)
+            add.setAutoDefault(False)
+            add.setToolTip(f"{add_text} ({shortcut})")
+            add.clicked.connect(lambda checked=False, key=kind: self.add_item(key))
+            add_shortcut = QShortcut(QKeySequence(shortcut), add)
+            add_shortcut.setAutoRepeat(False)
+            add_shortcut.activated.connect(add.click)
+            buttons.addWidget(add)
+            remove = QPushButton("Убрать строку")
+            remove.setAutoDefault(False)
+            remove.clicked.connect(lambda checked=False, target=table: self.remove_item(target))
+            buttons.addWidget(remove)
+            buttons.addStretch()
+            positions.addLayout(buttons)
+        left.addWidget(self.items_panel, 2)
         self.total = plain_label("")
         left.addWidget(self.total)
         split.addWidget(editor)
@@ -357,9 +386,10 @@ class DocumentDialog(SafeDialog):
         self.kind.setCurrentIndex(max(0, self.kind.findData(selected_kind)))
         self.description.setPlainText(values["description"])
         self.recommendations.setPlainText(values.get("recommendations", ""))
-        self.items.setRowCount(0)
+        for table in self.item_tables.values():
+            table.setRowCount(0)
         for row in values["items"]:
-            self.add_item(values=row)
+            self.add_item(row.get("kind", "work"), values=row)
         self.items_panel.setVisible(values["kind"] == "detailed")
         self.recommendations_panel.setVisible(selected_kind == "service_sheet")
         self.original = self.state()
@@ -389,37 +419,43 @@ class DocumentDialog(SafeDialog):
             raise ValueError("Ремонт не найден.")
         return dict(repair)
 
-    def add_item(self, checked=False, *, values=None):
-        row = self.items.rowCount()
-        self.items.insertRow(row)
-        values = values or {"kind": "work", "title": "", "quantity": "1", "price": ""}
-        kind = QComboBox()
-        kind.addItem("Работа", "work")
-        kind.addItem("Запчасть", "part")
-        kind.setCurrentIndex(max(0, kind.findData(values["kind"])))
-        kind.currentIndexChanged.connect(self.changed)
-        self.items.setCellWidget(row, 0, kind)
-        for column, key in enumerate(("title", "quantity", "price"), 1):
-            self.items.setItem(row, column, QTableWidgetItem(values[key]))
+    def add_item(self, kind, *, values=None):
+        table = self.item_tables[kind]
+        row = table.rowCount()
+        defaults = {"title": "", "quantity": "1", "price": ""}
+        with QSignalBlocker(table):
+            table.insertRow(row)
+            for column, field in enumerate(ITEM_FIELDS):
+                value = defaults[field] if values is None else values[field]
+                table.setItem(row, column, QTableWidgetItem(value))
+        if values is None:
+            table.setFocus()
+            table.setCurrentCell(row, 0)
+            table.editItem(table.item(row, 0))
         self.changed()
 
-    def remove_item(self):
-        row = self.items.currentRow()
+    def remove_item(self, table):
+        row = table.currentRow()
         if row >= 0:
-            self.items.removeRow(row)
+            table.removeRow(row)
             self.changed()
 
+    def commit_item_editor(self):
+        focused = self.focusWidget()
+        for table in self.item_tables.values():
+            if focused is not None and table.viewport().isAncestorOf(focused):
+                table.setFocus()
+                break
+
+    def item_rows(self, kind):
+        table = self.item_tables[kind]
+        return [
+            {"kind": kind}
+            | {field: table.item(row, col).text() for col, field in enumerate(ITEM_FIELDS)}
+            for row in range(table.rowCount())
+        ]
+
     def state(self):
-        rows = []
-        for row in range(self.items.rowCount()):
-            kind = self.items.cellWidget(row, 0)
-            rows.append(
-                {"kind": kind.currentData() if kind else "work"}
-                | {
-                    key: self.items.item(row, column).text() if self.items.item(row, column) else ""
-                    for column, key in enumerate(("title", "quantity", "price"), 1)
-                }
-            )
         return {
             "kind": "simple"
             if self.kind.currentData() == "service_sheet"
@@ -427,7 +463,7 @@ class DocumentDialog(SafeDialog):
             "layout": "service_sheet" if self.kind.currentData() == "service_sheet" else "receipt",
             "recommendations": self.recommendations.toPlainText(),
             "description": self.description.toPlainText(),
-            "items": rows,
+            "items": [row for kind in self.item_tables for row in self.item_rows(kind)],
         }
 
     def update_total(self):
@@ -442,13 +478,23 @@ class DocumentDialog(SafeDialog):
             )
             self.total.setText(f"Итог: {value + ' ₽' if value else 'стоимость не указана'}")
         else:
+            rows = []
+            for kind, label in self.item_subtotals.items():
+                group = self.item_rows(kind)
+                rows.extend(group)
+                try:
+                    items = normalize_items(group) if group else []
+                    subtotal = amount_text(sum(item["total_kopecks"] for item in items))
+                    label.setText(f"{subtotal} ₽")
+                except ValueError:
+                    label.setText("Заполните позиции")
             try:
-                items = normalize_items(self.state()["items"])
+                items = normalize_items(rows)
                 self.total.setText(
                     f"Итог позиций: {amount_text(sum(row['total_kopecks'] for row in items))} ₽"
                 )
-            except ValueError:
-                self.total.setText("Заполните наименования, количество и цены позиций.")
+            except ValueError as error:
+                self.total.setText(str(error))
 
     def changed(self, *_):
         if self.busy:
@@ -498,6 +544,7 @@ class DocumentDialog(SafeDialog):
     def create(self):
         if self.current_document or self.deleted_repair:
             return False
+        self.commit_item_editor()
         value = self.state()
         try:
             try:
@@ -536,6 +583,7 @@ class DocumentDialog(SafeDialog):
             self.print_document()
 
     def save(self, checked=False, *, close=True):
+        self.commit_item_editor()
         try:
             if not self.current_document:
                 self.service.save_draft(self.repair_id, self.state())
