@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
 
 
 def build(output: Path, compiler: Path | None = None):
@@ -141,12 +142,12 @@ def build(output: Path, compiler: Path | None = None):
             ],
             check=True,
         )
-    shutil.make_archive(
-        str(output / f"AutoService-{version}-Windows-x64-portable"),
-        "zip",
-        bundle.parent,
-        bundle.name,
-    )
+    release_folder = Path(f"AutoService-{version}")
+    archive_path = output / f"{release_folder.name}-Windows-x64-portable.zip"
+    with ZipFile(archive_path, "w", compression=ZIP_DEFLATED) as archive:
+        archive.write(bundle, release_folder)
+        for item in sorted(bundle.rglob("*")):
+            archive.write(item, release_folder / item.relative_to(bundle))
     files = sorted(output.glob("*.exe")) + sorted(output.glob("*.zip")) + [guide]
     (output / "SHA256SUMS.txt").write_text(
         "\n".join(f"{hashlib.sha256(file.read_bytes()).hexdigest()}  {file.name}" for file in files)

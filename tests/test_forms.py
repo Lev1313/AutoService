@@ -191,8 +191,12 @@ def test_three_cars_can_be_edited_independently(application, tmp_path, monkeypat
     window.show()
     try:
         page = window.vehicles_page
-        for make in ("Ford", "Honda", "Volkswagen"):
-            window.records.save_vehicle({"make": make})
+        for vehicle in (
+            {"make": "Ford", "model": "Focus", "plate": "А123ВС98"},
+            {"make": "Honda", "vin": "shhfk2760bu000002"},
+            {"make": "Volkswagen", "model": "Golf"},
+        ):
+            window.records.save_vehicle(vehicle)
         page.refresh()
         cards = []
         repairs = []
@@ -208,8 +212,19 @@ def test_three_cars_can_be_edited_independently(application, tmp_path, monkeypat
         assert len(window.workspace.dialogs) == 6
         assert window.isEnabled()
         assert all(dialog.isVisible() and not dialog.isModal() for dialog in cards + repairs)
+        assert [card.windowTitle() for card in cards] == [
+            "а123вс98",
+            "SHHFK2760BU000002",
+            "Volkswagen Golf",
+        ]
+
+        vehicle_editor = cards[0].edit_vehicle()
+        vehicle_editor.fields["plate"].setText("В456КМ98")
+        vehicle_editor.save()
+        assert cards[0].windowTitle() == "в456км98"
         window.list_work_windows()
         assert len(window.window_menu.actions()) == 6
+        assert "в456км98" in [action.text() for action in window.window_menu.actions()]
 
         assert repairs[1].save(close=False)
         assert cards[1].open_repair() is repairs[1]

@@ -636,8 +636,8 @@ class VehicleCard(QDialog):
         if repair_id is None and 0 <= previous < len(self.rows):
             repair_id = self.rows[previous]["id"]
         vehicle = self.records.vehicle(self.vehicle_id)
-        self.setWindowTitle(f"Автомобиль · {vehicle_label(vehicle) or 'Карточка'}")
         name = " ".join(filter(None, (vehicle["make"], vehicle["model"]))) or "Автомобиль"
+        self.setWindowTitle(vehicle["plate"] or vehicle["vin"] or name)
         self.heading.setText(f"{name} · {vehicle['plate'] or 'без госномера'}")
         latest = self.records.latest_mileage(self.vehicle_id)
         source_name = {"maintenance": "из ТО", "import": "из TXT"}.get(
