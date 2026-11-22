@@ -6,6 +6,7 @@ from io import BytesIO
 from pathlib import Path
 from xml.sax.saxutils import escape
 
+from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -137,7 +138,10 @@ def build_service_sheet(document: dict) -> bytes:
         if data["total_kopecks"] is not None:
             flow.append(Spacer(1, LINE_HEIGHT / 2))
             caption = item_total_label(data["items"])
-            flow.append(paragraph(f"{caption}: {amount_text(data['total_kopecks'])} ₽", bold))
+            total_style = ParagraphStyle("SheetTotal", parent=bold, alignment=TA_RIGHT)
+            flow.append(
+                paragraph(f"{caption}: {amount_text(data['total_kopecks'])} ₽", total_style)
+            )
     # Последняя строка остаётся с полосой, которая идёт за текстом.
     flow[-1].keepWithNext = True
     flow.append(Spacer(1, 15.45))

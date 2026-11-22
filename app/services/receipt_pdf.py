@@ -130,7 +130,7 @@ def build_pdf(document: dict) -> bytes:
         )
     )
     flow.append(info)
-    flow.append(paragraph("Что сделали", section))
+    flow.append(paragraph("Ход работ", section))
     # Отдельные абзацы позволяют переносить длинную запись на несколько страниц.
     for line in (data["description"] or "Описание не указано").splitlines():
         flow.append(paragraph(line or " "))
@@ -140,25 +140,14 @@ def build_pdf(document: dict) -> bytes:
             flow.append(paragraph(line or " "))
 
     def total_line(label, amount):
-        row = Table(
-            [[paragraph(label, section), paragraph(f"{amount_text(amount)} ₽", right)]],
-            colWidths=[140 * mm, 30 * mm],
-            hAlign="LEFT",
+        return paragraph(
+            f"{label} {amount_text(amount)} ₽",
+            ParagraphStyle("OrderTotal", parent=section, alignment=TA_RIGHT),
         )
-        row.setStyle(
-            TableStyle(
-                [
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-                ]
-            )
-        )
-        return row
 
     for kind, title, subtotal in (
-        ("work", "Работы", "Итого по работам"),
         ("part", "Запчасти", "Итого по запчастям"),
+        ("work", "Работы", "Итого по работам"),
     ):
         items = [item for item in data["items"] if item["kind"] == kind]
         if not items:
@@ -226,7 +215,7 @@ def build_pdf(document: dict) -> bytes:
         canvas.restoreState()
 
     def first_page(canvas, doc):
-        draw_foltz_header(canvas, align_contacts=True)
+        draw_foltz_header(canvas)
         footer(canvas, doc)
 
     template = SimpleDocTemplate(

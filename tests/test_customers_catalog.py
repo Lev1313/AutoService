@@ -226,16 +226,17 @@ def test_duplicate_phone_requires_explicit_decision(application, records, monkey
 
 def test_customer_page_refreshes_existing_contacts_after_navigation(application, records):
     window = create_window(records.path)
-    assert window.navigation.item(1).text() == "Клиенты"
+    index = window.pages.indexOf(window.customers_page)
+    assert window.navigation.item(index).text() == "Клиенты"
     client = records.save_contact({"name": "Новый вымышленный", "phone": "000-777"})
-    window.navigation.setCurrentRow(1)
+    window.navigation.setCurrentRow(index)
     assert window.pages.currentWidget() is window.customers_page
     assert window.customers_page.rows[0]["id"] == client
     window.customers_page.search.setText("000777")
     assert window.customers_page.table.rowCount() == 1
     window.navigation.setCurrentRow(0)
     records.save_contact({"name": "Исправлен", "phone": "000-777"}, client)
-    window.navigation.setCurrentRow(1)
+    window.navigation.setCurrentRow(index)
     assert window.customers_page.table.item(0, 0).text() == "Исправлен"
     window.close()
 

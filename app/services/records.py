@@ -1,6 +1,5 @@
 """Автомобили, контакты и ремонты; суммы — целые копейки."""
 
-import json
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -14,6 +13,13 @@ def search_key(value: str) -> str:
 
 def identity_key(value: str) -> str:
     return search_key(value).translate(str.maketrans("авекмнорстух", "abekmhopctyx"))
+
+
+def check_repair_notes(row, expected):
+    if expected and any(
+        row[key] != expected[key] for key in ("description", "recommendations", "amount_kopecks")
+    ):
+        raise ValueError("Текст ремонта изменён в другом окне. Откройте запись заново.")
 
 
 def parse_amount(value: str) -> int | None:
@@ -266,6 +272,23 @@ class Records:
                 )
             ]
 
+    def unfinished_repairs(self, query=""):
+        with connect(self.path) as connection:
+            rows = connection.execute(
+                """SELECT r.id, r.vehicle_id, r.visit_date, r.description,
+                          v.make, v.model, v.plate, v.vin
+                FROM repairs r JOIN vehicles v ON v.id = r.vehicle_id
+                WHERE r.deleted_at IS NULL AND r.state_known = 1 AND r.completed = 0
+                ORDER BY r.visit_date DESC, r.id DESC"""
+            ).fetchall()
+        words = [search_key(word) for word in query.split()]
+        fields = ("make", "model", "plate", "vin", "description")
+        return [
+            dict(row)
+            for row in rows
+            if all(any(word in search_key(row[field] or "") for field in fields) for word in words)
+        ]
+
     def latest_mileage(self, vehicle_id: int, on_date=None, exclude_repair=None):
         with connect(self.path) as connection:
             row = connection.execute(
@@ -311,6 +334,7 @@ class Records:
         allow_unverified: bool = False,
         *,
         appointment_id: int | None = None,
+        expected_notes=None,
     ) -> int:
         visit_date = values.get("visit_date")
         existing = None
@@ -328,6 +352,8 @@ class Records:
             except (ValueError, TypeError):
                 raise ValueError("Укажите корректную дату ремонта.") from None
         km = values.get("km")
+        if km is None and values.get("completed") and not (existing and existing["completed"]):
+            raise ValueError("Укажите пробег для завершения ремонта.")
         if km is not None and (type(km) is not int or not 0 <= km <= 100_000_000):
             raise ValueError("Пробег должен быть целым неотрицательным числом.")
         carried_km, carried_on = values.get("carried_km"), values.get("carried_on")
@@ -380,36 +406,39 @@ class Records:
             or bool(values.get("completed"))
         )
         with connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if repair_id is not None:
+                current = connection.execute(
+                    "SELECT * FROM repairs WHERE id=? AND vehicle_id=? AND deleted_at IS NULL",
+                    (repair_id, vehicle_id),
+                ).fetchone()
+                if current is None:
+                    raise ValueError("Ремонт не найден или удалён.")
+                check_repair_notes(current, expected_notes)
             exists = connection.execute(
                 "SELECT id FROM vehicles WHERE id=?", (vehicle_id,)
             ).fetchone()
             if exists is None:
                 raise ValueError("Автомобиль не найден.")
-            recommendations = values.get("recommendations")
-            if recommendations is None:
-                recommendations = (
-                    existing["recommendations"]
-                    if existing
-                    else self.previous_recommendations(vehicle_id, visit_date)
-                )
             parameters = (
-                recommendations,
                 visit_date,
                 str(values.get("description", "")),
                 amount,
                 int(bool(values.get("completed", False))),
             )
             if repair_id is None:
+                notes = values.get("recommendations")
+                if notes is None:
+                    notes = self.previous_recommendations(vehicle_id, visit_date)
                 repair_id = connection.execute(
-                    """INSERT INTO repairs(recommendations, visit_date, description, amount_kopecks,
-                    completed, vehicle_id) VALUES (?, ?, ?, ?, ?, ?)""",
-                    (*parameters, vehicle_id),
+                    """INSERT INTO repairs(visit_date, description, amount_kopecks,
+                    completed, vehicle_id, recommendations) VALUES (?, ?, ?, ?, ?, ?)""",
+                    (*parameters, vehicle_id, notes),
                 ).lastrowid
             else:
                 cursor = connection.execute(
-                    """UPDATE repairs SET recommendations=?, visit_date=?, description=?,
-                    amount_kopecks=?, completed=?, undated_km=?, state_known=?
-                    WHERE id=? AND vehicle_id=?""",
+                    """UPDATE repairs SET visit_date=?, description=?, amount_kopecks=?,
+                    completed=?, undated_km=?, state_known=? WHERE id=? AND vehicle_id=?""",
                     (
                         *parameters,
                         km if visit_date is None else None,
@@ -420,19 +449,17 @@ class Records:
                 )
                 if cursor.rowcount != 1:
                     raise ValueError("Ремонт не найден у этого автомобиля.")
-            if existing:
-                draft = connection.execute(
-                    "SELECT payload FROM document_drafts WHERE repair_id=?", (repair_id,)
-                ).fetchone()
-                if draft:
-                    payload = json.loads(draft[0])
-                    for key in ("description", "recommendations"):
-                        if key in values and values[key] != existing[key]:
-                            payload[key] = values[key]
-                    connection.execute(
-                        "UPDATE document_drafts SET payload=? WHERE repair_id=?",
-                        (json.dumps(payload, ensure_ascii=False), repair_id),
-                    )
+                notes = values.get("recommendations", current["recommendations"])
+                connection.execute(
+                    "UPDATE repairs SET recommendations=? WHERE id=?", (notes, repair_id)
+                )
+                for key in ("description", "recommendations"):
+                    if key in values and values[key] != current[key]:
+                        connection.execute(
+                            "UPDATE document_drafts SET payload=json_set(payload, ?, ?) "
+                            "WHERE repair_id=?",
+                            ("$." + key, values[key], repair_id),
+                        )
             connection.execute(
                 "UPDATE repairs SET carried_km=?,carried_on=? WHERE id=?",
                 (carried_km, carried_on, repair_id),

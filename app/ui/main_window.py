@@ -3,7 +3,7 @@
 import sqlite3
 from pathlib import Path
 
-from PySide6.QtCore import QDateTime, QSettings, Qt
+from PySide6.QtCore import QDateTime, QSettings, Qt, QTimer
 from PySide6.QtGui import QKeySequence, QPalette, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -26,17 +26,18 @@ from PySide6.QtWidgets import (
 )
 
 from app.database.connection import backup_database, restore_database
+from app.services.drive_backup import read_status
 from app.services.records import Records
 from app.ui.appointments import AppointmentsPage
 from app.ui.customers import CustomersPage
 from app.ui.help import HelpDialog
 from app.ui.maintenance import CallsPage
 from app.ui.theme import THEME_KEY, apply_theme
-from app.ui.vehicles import VehiclesPage, primary_button
+from app.ui.vehicles import UnfinishedRepairsPage, VehiclesPage, primary_button
 from app.ui.work_windows import work_windows
 from app.version import VERSION
 
-SECTIONS = ("Автомобили", "Клиенты", "Звонки", "Записи", "Настройки")
+SECTIONS = ("Автомобили", "Незавершённые ремонты", "Клиенты", "Звонки", "Записи", "Настройки")
 LAST_BACKUP_KEY = "last_manual_backup"
 
 
@@ -70,7 +71,7 @@ class NavigationDelegate(QStyledItemDelegate):
 class MainWindow(QMainWindow):
     def __init__(self, db_path: Path) -> None:
         super().__init__()
-        self.setWindowTitle("АвтоСервис — учёт автомобилей и ремонтов")
+        self.setWindowTitle("ФольцМастер — учёт автомобилей и ремонтов")
         self.resize(1100, 720)
         self.setMinimumSize(800, 540)
         self.workspace = work_windows(self)
@@ -87,7 +88,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(0)
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(210)
+        sidebar.setFixedWidth(236)
         side_layout = QVBoxLayout(sidebar)
         side_layout.setContentsMargins(18, 25, 18, 18)
         brand = QHBoxLayout()
@@ -95,7 +96,7 @@ class MainWindow(QMainWindow):
         logo = QLabel()
         logo.setPixmap(self.windowIcon().pixmap(32, 32))
         brand.addWidget(logo)
-        brand.addWidget(label("АвтоСервис", "brand"), 1)
+        brand.addWidget(label("ФольцМастер", "brand"), 1)
         side_layout.addLayout(brand)
         side_layout.addSpacing(24)
         self.navigation = QListWidget()
@@ -117,18 +118,24 @@ class MainWindow(QMainWindow):
         self.pages = QStackedWidget()
         self.records = Records(db_path)
         self.vehicles_page = VehiclesPage(self.records)
+        self.unfinished_repairs_page = UnfinishedRepairsPage(self.records)
         self.customers_page = CustomersPage(self.records)
         self.calls_page = CallsPage(self.records, "Звонки")
         self.appointments_page = AppointmentsPage(self.records)
         self.calls_page.appointment_requested.connect(self.schedule_from_call)
         for page in (
             self.vehicles_page,
+            self.unfinished_repairs_page,
             self.customers_page,
             self.calls_page,
             self.appointments_page,
             self.settings_page(theme),
         ):
             self.pages.addWidget(page)
+        drive_timer = QTimer(self)
+        drive_timer.setInterval(15000)
+        drive_timer.timeout.connect(self.refresh_drive_status)
+        drive_timer.start()
         layout.addWidget(self.pages, 1)
         self.setCentralWidget(root)
         self.workspace.customer_saved.connect(self.refresh_current_page)
@@ -219,6 +226,9 @@ class MainWindow(QMainWindow):
                 True,
             )
         )
+        self.drive_status = label("", "muted", True)
+        storage.addWidget(self.drive_status)
+        self.refresh_drive_status()
 
         documents = self.settings_group(content, "Документы и экспорт")
         receipts = QPushButton("Реквизиты для документов")
@@ -258,11 +268,37 @@ class MainWindow(QMainWindow):
         page = self.pages.widget(index)
         if page in (
             self.vehicles_page,
+            self.unfinished_repairs_page,
             self.customers_page,
             self.calls_page,
             self.appointments_page,
         ):
             page.refresh()
+        elif page is not None:
+            self.refresh_drive_status()
+
+    def refresh_drive_status(self):
+        folder = self.db_path.parent / "drive-backup"
+        if not (folder / "settings.json").is_file():
+            self.drive_status.hide()
+            return
+        self.drive_status.show()
+        try:
+            state = read_status(folder / "status.json")
+        except (OSError, ValueError):
+            self.drive_status.setText("Google Диск · статус недоступен.")
+            return
+        stamp = QDateTime.fromString(state.get("confirmed_at", ""), Qt.DateFormat.ISODate)
+        confirmed = (
+            f"Последняя загрузка подтверждена {stamp.toLocalTime().toString('dd.MM.yyyy HH:mm')}."
+            if stamp.isValid()
+            else "Подтверждённых загрузок пока нет."
+        )
+        pending = state.get("pending", 0)
+        error = state.get("error")
+        self.drive_status.setText(
+            f"Google Диск · {confirmed} В очереди: {pending}." + (f"\n{error}" if error else "")
+        )
 
     def schedule_from_call(self, vehicle_id, reason):
         if self.appointments_page.edit(vehicle_id=vehicle_id, reason=reason):
@@ -270,7 +306,7 @@ class MainWindow(QMainWindow):
 
     def focus_search(self):
         page = self.pages.currentWidget()
-        if page not in (self.vehicles_page, self.customers_page):
+        if page not in (self.vehicles_page, self.unfinished_repairs_page, self.customers_page):
             page = self.vehicles_page
             self.navigation.setCurrentRow(self.pages.indexOf(page))
         page.search.setFocus()
@@ -349,7 +385,7 @@ class MainWindow(QMainWindow):
             return
         try:
             safety_copy = restore_database(self.db_path, Path(filename))
-        except (OSError, ValueError, RuntimeError) as error:
+        except (OSError, ValueError, RuntimeError, sqlite3.Error) as error:
             QMessageBox.warning(self, "Не удалось восстановить данные", str(error))
             return
         self.vehicles_page.refresh()

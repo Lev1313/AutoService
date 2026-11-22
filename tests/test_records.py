@@ -100,6 +100,9 @@ def test_draft_completion_edit_and_mileage_consistency(records):
     repair = records.save_repair(car, values)
     assert records.repairs(car)[0]["completed"] == 0
     assert records.repairs(car)[0]["amount_kopecks"] is None
+    with pytest.raises(ValueError, match="Укажите пробег"):
+        records.save_repair(car, values | {"completed": True, "km": None}, repair)
+    assert not records.repairs(car)[0]["completed"]
     records.save_repair(car, values | {"completed": True, "amount_kopecks": 0}, repair)
     assert records.repairs(car)[0]["completed"] == 1
     assert records.repairs(car)[0]["amount_kopecks"] == 0

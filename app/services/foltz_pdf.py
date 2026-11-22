@@ -7,7 +7,7 @@ FOLTZ_PAGE = (595.32, 841.92)
 HEADER_IMAGE = Path(__file__).resolve().parents[1] / "assets" / "service_sheet" / "header.jpg"
 
 
-def draw_foltz_header(canvas, *, align_contacts=False):
+def draw_foltz_header(canvas):
     form = "FoltzHeader"
     if not canvas.hasForm(form):
         # Сохраняем исходный JPEG и параметр интерполяции из PDF образца.
@@ -20,27 +20,26 @@ def draw_foltz_header(canvas, *, align_contacts=False):
     canvas.saveState()
     canvas.translate(85.45, 696.12)
     canvas.scale(481.55, 89.15)
-    if align_contacts:
-        # Pixel bounds in the original 848 × 157 letterhead, from its top left.
-        # Keep the logo intact and align each printed contact line to x=837.
-        def draw_region(left, top, right, bottom, shift):
-            canvas.saveState()
-            canvas.translate(shift / 848, 0)
-            clip = canvas.beginPath()
-            clip.rect(left / 848, 1 - bottom / 157, (right - left) / 848, (bottom - top) / 157)
-            canvas.clipPath(clip, stroke=0, fill=0)
-            canvas.doForm(form)
-            canvas.restoreState()
 
-        draw_region(0, 0, 630, 157, 0)
-        for top, bottom, end in (
-            (0, 49, 833),
-            (49, 72, 825),
-            (72, 94, 811),
-            (94, 113, 813),
-            (113, 157, 836),
-        ):
-            draw_region(630, top, 848, bottom, 837 - end)
-    else:
+    # Координаты полос в исходном JPEG, в пикселях от верхнего левого угла.
+    # Рисунок слева сохраняет своё место. Правый край надписей — x=840.
+    def draw_region(left, top, right, bottom, shift=0):
+        canvas.saveState()
+        canvas.translate(shift / 848, 0)
+        clip = canvas.beginPath()
+        clip.rect(left / 848, 1 - bottom / 157, (right - left) / 848, (bottom - top) / 157)
+        canvas.clipPath(clip, stroke=0, fill=0)
         canvas.doForm(form)
+        canvas.restoreState()
+
+    draw_region(0, 0, 630, 157)
+    for top, bottom, end in (
+        (0, 49, 833),
+        (49, 72, 825),
+        (72, 94, 811),
+        (94, 113, 812),
+        (113, 133, 835),
+        (133, 157, 835),
+    ):
+        draw_region(630, top, 835 if top >= 113 else 848, bottom, 840 - end)
     canvas.restoreState()

@@ -5,6 +5,10 @@ import sys
 
 def main() -> int:
     args = sys.argv[1:]
+    if args == ["--drive-backup"]:
+        from app.services.drive_backup import command
+
+        return command()
     if args and args[0] in ("--self-test", "--self-test-reopen"):
         from app.diagnostics import command
 

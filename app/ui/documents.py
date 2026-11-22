@@ -36,7 +36,6 @@ from app.ui.vehicles import (
     SafeDialog,
     plain_label,
     primary_button,
-    recommendations_label,
     vehicle_label,
 )
 
@@ -165,14 +164,14 @@ class DocumentDialog(SafeDialog):
         self.kind.addItem("Новый формат: заказ-наряд", "receipt")
         self.kind.currentIndexChanged.connect(self.changed)
         left.addWidget(self.kind)
-        left.addWidget(plain_label("Что сделали"))
+        left.addWidget(plain_label("Ход работ"))
         self.description = QPlainTextEdit()
         self.description.textChanged.connect(self.changed)
         left.addWidget(self.description, 1)
         self.recommendations_panel = QWidget()
         recommendations_layout = QVBoxLayout(self.recommendations_panel)
         recommendations_layout.setContentsMargins(0, 0, 0, 0)
-        recommendations_layout.addWidget(recommendations_label())
+        recommendations_layout.addWidget(plain_label("Рекомендации"))
         self.recommendations = QPlainTextEdit()
         self.recommendations.setPlaceholderText("Необязательно. Сохраняются в ремонте.")
         self.recommendations.setMaximumHeight(self.recommendations.minimumSizeHint().height())

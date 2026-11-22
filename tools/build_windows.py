@@ -88,6 +88,8 @@ def build(output: Path, compiler: Path | None = None):
     if list((bundle / "_internal").glob("icu*.dll")):
         raise RuntimeError("Упаковщик захватил стороннюю ICU вместо системной. Выпуск остановлен.")
     shutil.copy2(project / "docs" / "OWNER-GUIDE.txt", bundle / "Инструкция.txt")
+    shutil.copy2(project / "docs" / "GOOGLE-DRIVE-BACKUP.md", bundle / "GOOGLE-DRIVE-BACKUP.md")
+    shutil.copy2(project / "tools" / "run_drive_backup.ps1", bundle / "run_drive_backup.ps1")
     subprocess.run(
         [sys.executable, "-m", "tools.make_print_guide", "--output", str(output)],
         cwd=project,

@@ -41,10 +41,8 @@ from app.ui.work_windows import work_windows
 ERRORS = (ValueError, OSError, sqlite3.Error)
 
 
-def recommendations_label():
-    label = plain_label("Рекомендации")
-    label.setStyleSheet("color: black; font-weight: bold;")
-    return label
+def date_text(iso_date):
+    return QDate.fromString(iso_date, "yyyy-MM-dd").toString("dd.MM.yyyy")
 
 
 def plain_label(text: str) -> QLabel:
@@ -355,24 +353,18 @@ class RepairDialog(SafeDialog):
         self.mileage = QLineEdit()
         self.mileage.setMaxLength(12)
         self.mileage.setAccessibleName("Пробег, км")
-        self.carried = None
-        self.mileage.setPlaceholderText("Необязательно")
-        self.measured = QCheckBox("Пробег измерен при этом ремонте")
-        self.measured.setChecked(self.repair.get("km") is not None)
+        self.mileage.setPlaceholderText(
+            "" if self.repair.get("completed") else "Обязателен при завершении ремонта"
+        )
         self.mileage_note = plain_label("")
         form.addRow("Пробег, км", self.mileage)
-        form.addRow(self.measured)
         form.addRow(self.mileage_note)
-        if self.repair.get("carried_km") is not None:
-            self.carried = (self.repair["carried_km"], self.repair["carried_on"])
-            self.show_carried()
-        elif self.repair.get("km") is not None:
+        if self.repair.get("km") is not None:
             self.mileage.setText(str(self.repair["km"]))
-        elif not self.repair:
-            self.suggest_mileage()
-        self.mileage.textEdited.connect(self.mileage_edited)
-        self.measured.toggled.connect(self.measurement_changed)
-        self.visit_date.dateChanged.connect(self.date_changed)
+        self.mileage.textChanged.connect(self.show_mileage_note)
+        self.visit_date.dateChanged.connect(self.suggest_mileage)
+        self.date_known.toggled.connect(self.suggest_mileage)
+        self.suggest_mileage()
         self.mileage_verified = QCheckBox("Пробег проверен")
         self.mileage_verified.setChecked(bool(self.repair.get("verified")))
         self.mileage_verified.setVisible(self.repair.get("origin") == "txt")
@@ -382,19 +374,16 @@ class RepairDialog(SafeDialog):
         self.amount.setPlaceholderText("Пусто — неизвестно; 0 — бесплатно")
         form.addRow("Общая стоимость, ₽", self.amount)
         layout.addLayout(form)
-        layout.addWidget(plain_label("Что сделали"))
+        layout.addWidget(plain_label("Ход работ"))
         self.description = QPlainTextEdit(self.repair.get("description", ""))
-        self.description.setAccessibleName("Описание ремонта")
+        self.description.setAccessibleName("Ход работ")
         layout.addWidget(self.description, 1)
-        layout.addWidget(recommendations_label())
-        self.inherited = self.repair.get("recommendations", "")
-        if not self.repair:
-            self.inherited = records.previous_recommendations(
-                vehicle_id, self.visit_date.date().toString("yyyy-MM-dd")
-            )
-        self.recommendations = QPlainTextEdit(self.inherited)
+        layout.addWidget(plain_label("Рекомендации"))
+        self.recommendations = QPlainTextEdit(self.repair.get("recommendations", ""))
         self.recommendations.setAccessibleName("Рекомендации")
         layout.addWidget(self.recommendations, 1)
+        self.suggest_recommendations()
+        self.visit_date.dateChanged.connect(self.suggest_recommendations)
         self.positions = QPlainTextEdit()
         self.positions.setReadOnly(True)
         self.positions.setAccessibleName("Позиции заказ-наряда")
@@ -441,61 +430,78 @@ class RepairDialog(SafeDialog):
         self.positions.setPlainText("\n".join(lines))
         self.positions.setVisible(bool(lines))
 
-    def show_carried(self):
-        if self.carried:
-            self.mileage.setText(f"{self.carried[0]} ?")
-            self.mileage_note.setText(
-                f"Последний известный · замер {self.carried[1]}. Новый пробег не указан."
+    def suggest_recommendations(self):
+        if not self.repair and not self.recommendations.document().isModified():
+            self.recommendations.setPlainText(
+                self.records.previous_recommendations(
+                    self.vehicle_id, self.visit_date.date().toString("yyyy-MM-dd")
+                )
             )
-        else:
-            self.mileage.clear()
-            self.mileage_note.setText("Нет подходящего подтверждённого замера на эту дату.")
+
+    def show_mileage_note(self):
+        note = ""
+        if not self.mileage.text().strip() and self.carried:
+            km, recorded_on = self.carried
+            note = f"Последний известный пробег — {self.format_km(km)} от {date_text(recorded_on)}."
+        self.mileage_note.setText(note)
+        self.mileage_note.setVisible(bool(note))
 
     def suggest_mileage(self):
-        latest = self.records.latest_mileage(
-            self.vehicle_id, self.visit_date.date().toString("yyyy-MM-dd"), self.repair.get("id")
-        )
-        self.carried = (latest["km"], latest["recorded_on"]) if latest else None
-        self.show_carried()
-
-    def date_changed(self, *_):
-        if not self.repair and not self.recommendations.document().isModified():
-            self.inherited = self.records.previous_recommendations(
-                self.vehicle_id, self.visit_date.date().toString("yyyy-MM-dd")
-            )
-            self.recommendations.setPlainText(self.inherited)
-        if not self.measured.isChecked():
-            self.suggest_mileage()
-
-    def mileage_edited(self, text):
+        self.latest = None
         self.carried = None
-        self.measured.blockSignals(True)
-        self.measured.setChecked(bool(text.strip()))
-        self.measured.blockSignals(False)
-        if "?" in text:
-            self.mileage.setText(text.replace("?", "").strip())
-        self.mileage_note.setText("Новый замер" if text.strip() else "Пробег не указан")
+        if self.date_known.isChecked():
+            visit_date = self.visit_date.date().toString("yyyy-MM-dd")
+            latest = self.records.latest_mileage(self.vehicle_id, visit_date, self.repair.get("id"))
+            if latest:
+                self.latest = (latest["km"], latest["recorded_on"])
+            if (
+                visit_date == self.repair.get("visit_date")
+                and self.repair.get("carried_km") is not None
+            ):
+                self.carried = (self.repair["carried_km"], self.repair["carried_on"])
+            elif not self.repair.get("completed"):
+                self.carried = self.latest
+        self.show_mileage_note()
 
-    def measurement_changed(self, measured):
-        if measured:
-            value = self.carried[0] if self.carried else None
-            self.carried = None
-            if value is not None:
-                self.mileage.setText(str(value))
-            self.mileage_note.setText("Новый замер — укажите фактическое значение.")
-            self.mileage.setFocus()
-            self.mileage.selectAll()
+    @staticmethod
+    def format_km(km):
+        return f"{km:,}".replace(",", "\u202f") + " км"
+
+    def request_mileage(self):
+        self.suggest_mileage()
+        if self.latest:
+            km, recorded_on = self.latest
+            reading = self.format_km(km)
+            prompt = QMessageBox(self)
+            prompt.setWindowTitle("Укажите пробег для завершения ремонта")
+            prompt.setText(
+                f"Последнее показание — {reading} от {date_text(recorded_on)}. "
+                "Какой пробег на одометре сейчас?"
+            )
+            enter = prompt.addButton("Ввести пробег", QMessageBox.ButtonRole.RejectRole)
+            confirm = prompt.addButton(f"Те же {reading}", QMessageBox.ButtonRole.AcceptRole)
+            prompt.setDefaultButton(enter)
+            prompt.setEscapeButton(enter)
+            prompt.exec()
+            if prompt.clickedButton() == confirm:
+                self.mileage.setText(str(km))
+                return True
         else:
-            self.suggest_mileage()
+            self.mileage_note.setText("Укажите пробег для завершения ремонта.")
+            self.mileage_note.show()
+        self.mileage.setFocus()
+        return False
 
     def state(self):
+        km = self.mileage.text().strip()
+        carried_km, carried_on = self.carried if not km and self.carried else (None, None)
         values = {
             "visit_date": self.visit_date.date().toString("yyyy-MM-dd")
             if self.date_known.isChecked()
             else None,
-            "km": self.mileage.text() if self.carried is None else "",
-            "carried_km": self.carried[0] if self.carried else None,
-            "carried_on": self.carried[1] if self.carried else None,
+            "km": km,
+            "carried_km": carried_km,
+            "carried_on": carried_on,
             "amount": self.amount.text(),
             "description": self.description.toPlainText(),
             "recommendations": self.recommendations.toPlainText(),
@@ -506,6 +512,8 @@ class RepairDialog(SafeDialog):
 
     def save(self, checked=False, *, completed=None, close=True):
         try:
+            if completed and not self.mileage.text().strip() and not self.request_mileage():
+                return False
             values = self.state()
             km = values["km"].replace(" ", "").replace("\u00a0", "").strip()
             if km and (not km.isascii() or not km.isdigit()):
@@ -547,6 +555,7 @@ class RepairDialog(SafeDialog):
                 self.repair.get("id"),
                 allow_unverified=allow_unverified,
                 appointment_id=self.appointment["id"] if self.appointment else None,
+                expected_notes=self.repair,
             )
         except ERRORS as error:
             QMessageBox.warning(self, "Не удалось сохранить ремонт", str(error))
@@ -555,6 +564,7 @@ class RepairDialog(SafeDialog):
             row for row in self.records.repairs(self.vehicle_id) if row["id"] == repair_id
         )
         self.mileage_verified.setChecked(bool(self.repair["verified"]))
+        self.suggest_mileage()
         self.original = self.state()
         self.finish_button.setVisible(not self.repair["completed"])
         self.repair_saved.emit(repair_id)
@@ -788,7 +798,7 @@ class VehicleCard(QDialog):
                 text += (
                     "Убрать ремонт из истории? Его можно восстановить. "
                     "Замер этого ремонта перестанет определять текущий пробег.\n"
-                    f"Сохранены: документы — {links['documents']}, TXT — {links['sources']}.\n"
+                    f"Сохранены: квитанции — {links['documents']}, TXT — {links['sources']}.\n"
                 )
                 if links["maintenance"]:
                     text += (
@@ -897,7 +907,22 @@ def open_repair_window(records, vehicle_id, owner, repair=None, *, appointment=N
         editor = RepairDialog(records, vehicle_id, repair, appointment=appointment)
 
         def saved(repair_id):
+            from app.ui.documents import DocumentDialog
+
             workspace.dialogs[editor] = (RepairDialog, repair_id)
+            document = workspace.find((DocumentDialog, repair_id))
+            if document and not document.current_document:
+                for key in ("description", "recommendations"):
+                    widget = getattr(document, key)
+                    if (
+                        editor.repair[key] != document.expected[key]
+                        and widget.toPlainText() == document.original[key]
+                    ):
+                        widget.setPlainText(editor.repair[key])
+                        document.original[key] = editor.repair[key]
+                        document.expected[key] = editor.repair[key]
+            if document and not document.current_document:
+                document.expected["amount_kopecks"] = editor.repair["amount_kopecks"]
             workspace.repair_saved.emit(vehicle_id, repair_id)
 
         editor.repair_saved.connect(saved)
@@ -914,26 +939,24 @@ def open_document_window(records, repair_id, owner):
     def create():
         dialog = DocumentDialog(records, repair_id)
 
-        def saved():
-            repair = dialog.source_repair()
+        def refresh_repair():
             editor = workspace.find((RepairDialog, repair_id))
+            repair = dialog.source_repair()
             if editor:
-                for field, widget, new_value in (
-                    ("amount", editor.amount, amount_text(repair["amount_kopecks"])),
-                    ("description", editor.description, repair["description"]),
-                    ("recommendations", editor.recommendations, repair["recommendations"]),
-                ):
-                    if editor.state()[field] == editor.original[field]:
-                        if field == "amount":
-                            widget.setText(new_value)
-                        else:
-                            widget.setPlainText(new_value)
-                    editor.original[field] = new_value
+                for key in ("description", "recommendations"):
+                    widget = getattr(editor, key)
+                    if widget.toPlainText() == editor.original[key]:
+                        widget.setPlainText(repair[key])
+                        editor.original[key] = repair[key]
+                        editor.repair[key] = repair[key]
+                if editor.amount.text() == editor.original["amount"]:
+                    editor.amount.setText(amount_text(repair["amount_kopecks"]))
+                    editor.original["amount"] = editor.amount.text()
+                    editor.repair["amount_kopecks"] = repair["amount_kopecks"]
                 editor.show_positions(repair["document_items"])
-                editor.repair.update(repair)
             workspace.repair_saved.emit(repair["vehicle_id"], repair_id)
 
-        dialog.repair_updated.connect(saved)
+        dialog.repair_updated.connect(refresh_repair)
         return dialog
 
     return workspace.open((DocumentDialog, repair_id), create)
@@ -1036,3 +1059,88 @@ class VehiclesPage(QWidget):
         row = self.table.currentRow()
         if 0 <= row < len(self.rows):
             return open_vehicle_card(self.records, self.rows[row]["id"], self)
+
+
+class UnfinishedRepairsPage(QWidget):
+    def __init__(self, records: Records):
+        super().__init__()
+        self.records = records
+        self.rows = []
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(32, 30, 32, 24)
+        title = plain_label("Незавершённые ремонты")
+        title.setObjectName("title")
+        layout.addWidget(title)
+        self.search = QLineEdit()
+        self.search.setAccessibleName("Поиск незавершённых ремонтов")
+        self.search.setPlaceholderText("Автомобиль, госномер или описание работ")
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(self.refresh)
+        layout.addWidget(self.search)
+        self.table = make_table(("Дата ремонта", "Автомобиль", "Госномер", "Описание работ"))
+        self.table.setAccessibleName("Незавершённые ремонты")
+        header = self.table.horizontalHeader()
+        for column in (0, 2):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.cellDoubleClicked.connect(lambda *_: self.open_repair())
+        layout.addWidget(self.table, 1)
+        self.empty = plain_label("")
+        layout.addWidget(self.empty)
+        self.open_button = primary_button("Открыть ремонт")
+        self.open_button.clicked.connect(self.open_repair)
+        layout.addWidget(self.open_button, alignment=Qt.AlignmentFlag.AlignLeft)
+        enter = QShortcut(QKeySequence("Return"), self.table)
+        enter.setContext(Qt.ShortcutContext.WidgetShortcut)
+        enter.activated.connect(self.open_repair)
+
+    def refresh(self):
+        previous = self.table.currentRow()
+        selected_id = self.rows[previous]["id"] if 0 <= previous < len(self.rows) else None
+        try:
+            self.rows = self.records.unfinished_repairs(self.search.text())
+        except ERRORS as error:
+            QMessageBox.warning(self, "Не удалось открыть список ремонтов", str(error))
+            return
+        self.table.setRowCount(len(self.rows))
+        for index, repair in enumerate(self.rows):
+            values = (
+                date_text(repair["visit_date"]) if repair["visit_date"] else "—",
+                " ".join(filter(None, (repair["make"], repair["model"]))) or repair["vin"] or "—",
+                repair["plate"] or "—",
+                repair["description"] or "—",
+            )
+            for column, value in enumerate(values):
+                self.table.setItem(index, column, QTableWidgetItem(value))
+        self.empty.setText(
+            "Поиск не нашёл ремонтов."
+            if self.search.text().strip()
+            else "Незавершённых ремонтов нет"
+        )
+        self.empty.setVisible(not self.rows)
+        self.open_button.setEnabled(bool(self.rows))
+        if self.rows:
+            self.table.selectRow(
+                next((i for i, row in enumerate(self.rows) if row["id"] == selected_id), 0)
+            )
+
+    def open_repair(self):
+        index = self.table.currentRow()
+        if not 0 <= index < len(self.rows):
+            return None
+        row = self.rows[index]
+        try:
+            repair = next(
+                (
+                    item
+                    for item in self.records.repairs(row["vehicle_id"])
+                    if item["id"] == row["id"]
+                ),
+                None,
+            )
+        except ERRORS as error:
+            QMessageBox.warning(self, "Не удалось открыть ремонт", str(error))
+            return None
+        if repair is None or repair["completed"]:
+            self.refresh()
+            return None
+        return open_repair_window(self.records, row["vehicle_id"], self, repair)

@@ -14,18 +14,19 @@ from datetime import date
 from hashlib import sha256
 from pathlib import Path
 
-from PySide6.QtCore import QBuffer, QDate, QIODevice, QSize
+from PySide6.QtCore import QBuffer, QDate, QIODevice, QSize, QTimer
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtTest import QTest
 
-from app.bootstrap import create_application, create_window
+from app.bootstrap import create_application, create_window, open_startup_window
 from app.database.connection import (
     SCHEMA_V2,
     SCHEMA_VERSION,
     backup_database,
     connect,
     initialize_database,
+    recover_database,
     restore_database,
 )
 from app.services.appointments import Appointments
@@ -212,8 +213,36 @@ def prepare(root):
     }
 
 
+def check_startup_recovery(application, root, report):
+    for name, original in (("empty", b""), ("damaged", b"not a SQLite database")):
+        folder = root / name
+        folder.mkdir(exist_ok=False)
+        path = folder / "autoservice.sqlite3"
+        path.write_bytes(original)
+
+        def cancel(folder=folder):
+            prompt = application.activeModalWidget()
+            prompt.grab().save(str(folder / "recovery-window.png"))
+            prompt.reject()
+
+        QTimer.singleShot(50, cancel)
+        check(open_startup_window(path) is None, "Отмена аварийного восстановления")
+        check(path.read_bytes() == original, "Сохранность рабочего файла при отмене")
+        archive = recover_database(path, root / "release-backup.sqlite3")
+        check(archive.read_bytes() == original, "Исходный файл сохранён побайтно")
+        window = open_startup_window(path)
+        try:
+            check(
+                any(row["id"] == report["repair"] for row in window.records.repairs(report["car"])),
+                "Ремонт открыт после аварийного восстановления",
+            )
+        finally:
+            window.close()
+
+
 def reopen(root, report):
     application = create_application(["AutoService release check"])
+    check_startup_recovery(application, root, report)
     path = root / "self-test.sqlite3"
     window = create_window(path)
     try:
@@ -299,14 +328,18 @@ def reopen(root, report):
         check(
             window.pages.currentWidget() is window.vehicles_page, "Стартовая страница автомобилей"
         )
-        check(window.navigation.item(1).text() == "Клиенты", "Раздел клиентов после автомобилей")
-        check(window.navigation.item(2).text() == "Звонки", "Раздел звонков после клиентов")
+        check(
+            window.navigation.item(1).text() == "Незавершённые ремонты",
+            "Незавершённые ремонты после автомобилей",
+        )
+        check(window.navigation.item(2).text() == "Клиенты", "Клиенты после ремонтов")
+        check(window.navigation.item(3).text() == "Звонки", "Раздел звонков после клиентов")
         check(window.grab().save(str(root / "startup-window.png")), "Снимок стартовой страницы")
         for index in range(window.navigation.count()):
             window.navigation.setCurrentRow(index)
             application.processEvents()
             check(window.pages.currentIndex() == index, "Переключение раздела")
-        check(window.navigation.item(3).text() == "Записи", "Записи перед настройками")
+        check(window.navigation.item(4).text() == "Записи", "Записи перед настройками")
         check(not window.windowIcon().pixmap(16, 16).isNull(), "Значок программы")
         window.navigation.setCurrentRow(window.pages.indexOf(window.appointments_page))
         window.appointments_page.day.setDate(QDate(2026, 12, 1))
@@ -350,6 +383,13 @@ def reopen(root, report):
         window.theme_select.setCurrentIndex(window.theme_select.findData("light"))
 
         help_dialog = HelpDialog(window)
+        check(
+            f"Версия {VERSION} · схема базы {SCHEMA_VERSION}" in help_dialog.build_info.text(),
+            "Версия и схема базы в справке",
+        )
+        if getattr(sys, "frozen", False):
+            digest = sha256(Path(sys.executable).read_bytes()).hexdigest()
+            check(digest[:16] in help_dialog.build_info.text(), "Идентификатор EXE в справке")
         guide = help_dialog.guide.toPlainText()
         check("Завершить ремонт" in guide, "Инструкция в комплекте EXE")
         check("демонстрац" not in guide.casefold(), "Инструкция для обычной работы")

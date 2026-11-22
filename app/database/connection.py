@@ -3,7 +3,9 @@
 import sqlite3
 from contextlib import closing, contextmanager
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
+from shutil import copy2
 from tempfile import TemporaryDirectory
 from uuid import uuid4
 
@@ -174,7 +176,10 @@ def initialize_database(path: Path) -> None:
         connection.execute("BEGIN IMMEDIATE")
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         if version > SCHEMA_VERSION:
-            raise RuntimeError("База создана более новой версией AutoService. Обновите программу.")
+            raise RuntimeError(
+                f"Схема базы — {version}, эта сборка поддерживает схемы до {SCHEMA_VERSION}. "
+                "Откройте базу в более новой версии AutoService."
+            )
         if version == 0:
             tables = connection.execute(
                 "SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
@@ -230,13 +235,38 @@ def initialize_database(path: Path) -> None:
             connection.execute(
                 "ALTER TABLE repairs ADD COLUMN document_items TEXT NOT NULL DEFAULT '[]'"
             )
+            # Совместимость с первой сборкой, которая записывала схему 10.
             connection.execute("""UPDATE repairs SET recommendations=COALESCE(
                 (SELECT json_extract(payload,'$.recommendations') FROM document_drafts
-                 WHERE repair_id=repairs.id),
+                 WHERE repair_id=repairs.id AND json_valid(payload)),
                 (SELECT json_extract(payload,'$.recommendations') FROM documents
-                 WHERE repair_id=repairs.id ORDER BY id DESC LIMIT 1),''),
+                 WHERE repair_id=repairs.id AND json_valid(payload) ORDER BY id DESC LIMIT 1),''),
                 document_items=COALESCE((SELECT json_extract(payload,'$.items') FROM document_drafts
-                WHERE repair_id=repairs.id),'[]')""")
+                WHERE repair_id=repairs.id AND json_valid(payload)),'[]')""")
+        # В 0.5.20 редактор документов сохранял новые рекомендации отдельно от ремонта.
+        if not connection.execute(
+            "SELECT 1 FROM app_metadata WHERE key='repair_notes_synced'"
+        ).fetchone():
+            if version == 10:
+                connection.execute("""CREATE TEMP TABLE recovered_notes AS
+                    SELECT id, COALESCE(
+                        (SELECT json_extract(payload,'$.recommendations') FROM document_drafts
+                         WHERE repair_id=r.id AND json_valid(payload)),
+                        (SELECT CASE WHEN r.recommendations=COALESCE(
+                            json_extract(payload,'$.repair.recommendations'),'')
+                            THEN json_extract(payload,'$.recommendations') END FROM documents
+                         WHERE repair_id=r.id AND json_valid(payload)
+                         AND json_extract(payload,'$.layout')='service_sheet'
+                         ORDER BY id DESC LIMIT 1)
+                    ) AS notes FROM repairs r""")
+                changed = """SELECT n.id FROM recovered_notes n JOIN repairs r ON r.id=n.id
+                             WHERE n.notes IS NOT NULL AND n.notes<>r.recommendations"""
+                if connection.execute(f"SELECT EXISTS({changed})").fetchone()[0]:
+                    backup_database(path)
+                    connection.execute("""UPDATE repairs SET recommendations=n.notes
+                        FROM recovered_notes n WHERE n.id=repairs.id AND n.notes IS NOT NULL
+                        AND n.notes<>repairs.recommendations""")
+            connection.execute("INSERT INTO app_metadata VALUES ('repair_notes_synced','1')")
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         validate_tables(connection)
 
@@ -274,10 +304,54 @@ def validate_tables(connection):
         connection.execute(statement)
 
 
-def restore_database(path: Path, source_path: Path) -> Path:
-    """Проверить копию, сохранить текущую базу, атомарно восстановить снимок."""
-    path, source_path = path.resolve(), source_path.resolve()
-    if path == source_path:
+class DatabaseRecoveryRequired(RuntimeError):
+    """Рабочий файл есть, но открыть базу безопасно нельзя."""
+
+
+def check_database_at_startup(path: Path) -> None:
+    try:
+        size = path.stat().st_size
+    except FileNotFoundError:
+        return
+    if size == 0:
+        raise DatabaseRecoveryRequired("Файл рабочей базы имеет размер 0 байт.")
+    try:
+        with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
+            if connection.execute("PRAGMA quick_check(1)").fetchone() != ("ok",):
+                raise DatabaseRecoveryRequired("Рабочая база повреждена.")
+    except sqlite3.DatabaseError as error:
+        code = error.sqlite_errorcode
+        if code in (sqlite3.SQLITE_READONLY_ROLLBACK, sqlite3.SQLITE_READONLY_RECOVERY):
+            # Штатный откат журнала выполнит SQLite при обычном открытии базы.
+            return
+        if (code & 0xFF) in (sqlite3.SQLITE_CORRUPT, sqlite3.SQLITE_NOTADB):
+            raise DatabaseRecoveryRequired("Рабочая база повреждена.") from error
+        raise
+
+
+def validate_backup_content(connection):
+    validate_tables(connection)
+    if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
+        raise ValueError("В копии обнаружены повреждённые связи записей.")
+    for number, content, digest in connection.execute(
+        """SELECT d.number, f.content, f.sha256 FROM documents d
+        LEFT JOIN document_files f ON f.document_id = d.id ORDER BY d.id"""
+    ):
+        if content is None:
+            raise ValueError(f"В копии отсутствует PDF документа {number}.")
+        if not isinstance(content, bytes) or sha256(content).hexdigest() != digest:
+            raise ValueError(f"В копии повреждён PDF документа {number}.")
+    for source_id, name, content, digest in connection.execute(
+        "SELECT id, original_name, original_bytes, sha256 FROM import_sources ORDER BY id"
+    ):
+        if not isinstance(content, bytes) or sha256(content).hexdigest() != digest:
+            raise ValueError(f"В копии повреждён исходный TXT №{source_id} ({name}).")
+
+
+def prepare_restore(path: Path, source_path: Path, prepared: Path) -> None:
+    if path == source_path or (
+        path.exists() and source_path.exists() and path.samefile(source_path)
+    ):
         raise ValueError("Выберите отдельный файл резервной копии.")
     try:
         with closing(sqlite3.connect(source_path.as_uri() + "?mode=ro", uri=True)) as source:
@@ -290,22 +364,61 @@ def restore_database(path: Path, source_path: Path) -> Path:
             version = source.execute("PRAGMA user_version").fetchone()[0]
             if identity != ("AutoService",) or not 1 <= version <= SCHEMA_VERSION:
                 raise ValueError("Нужна совместимая резервная копия AutoService.")
-            if version < SCHEMA_VERSION:
-                # Проверяем и обновляем старую копию в отдельном временном каталоге.
-                # Исходная копия и текущая база до успешной миграции не меняются.
-                with TemporaryDirectory(prefix="restore-preview-", dir=path.parent) as directory:
-                    prepared = Path(directory) / "prepared.sqlite3"
-                    with closing(sqlite3.connect(prepared)) as staged:
-                        source.backup(staged)
-                    initialize_database(prepared)
-                    return restore_database(path, prepared)
-            # Проверяем поля, нужные приложению, до замены текущих данных.
-            validate_tables(source)
-            if source.execute("PRAGMA foreign_key_check").fetchone() is not None:
-                raise ValueError("В копии обнаружены повреждённые связи записей.")
-            safety_copy = backup_database(path)
-            with closing(sqlite3.connect(path, timeout=5)) as target:
-                source.backup(target)
+            with closing(sqlite3.connect(prepared)) as staged:
+                source.backup(staged)
+        if version < SCHEMA_VERSION:
+            initialize_database(prepared)
+        with closing(sqlite3.connect(prepared)) as staged:
+            validate_backup_content(staged)
     except sqlite3.Error as error:
-        raise ValueError(f"Не удалось прочитать или восстановить копию: {error}") from error
+        raise ValueError(f"Не удалось проверить резервную копию: {error}") from error
+
+
+def restore_database(path: Path, source_path: Path) -> Path:
+    """Проверить копию, сохранить текущую базу и восстановить снимок."""
+    path, source_path = path.resolve(), source_path.resolve()
+    with TemporaryDirectory(prefix="restore-preview-", dir=path.parent) as directory:
+        prepared = Path(directory) / "prepared.sqlite3"
+        prepare_restore(path, source_path, prepared)
+        safety_copy = backup_database(path)
+        with (
+            closing(sqlite3.connect(prepared)) as source,
+            closing(sqlite3.connect(path, timeout=5)) as target,
+        ):
+            source.backup(target)
     return safety_copy
+
+
+def recover_database(path: Path, source_path: Path) -> Path:
+    """Восстановить нечитаемую базу с побайтным сохранением исходных файлов."""
+    path, source_path = path.resolve(), source_path.resolve()
+    try:
+        check_database_at_startup(path)
+    except DatabaseRecoveryRequired:
+        pass
+    else:
+        raise ValueError("Для аварийного восстановления нужен повреждённый или пустой файл базы.")
+    with TemporaryDirectory(prefix="recovery-stage-", dir=path.parent) as directory:
+        stage = Path(directory)
+        prepared = stage / "prepared.sqlite3"
+        prepare_restore(path, source_path, prepared)
+        archive = path.parent / "backups" / f"damaged-{uuid4().hex}"
+        archive.mkdir(parents=True)
+        sidecars = [
+            file
+            for suffix in ("-journal", "-wal", "-shm")
+            if (file := path.with_name(path.name + suffix)).exists()
+        ]
+        for file in (path, *sidecars):
+            copy2(file, archive / file.name)
+        moved = []
+        try:
+            for file in sidecars:
+                saved = file.replace(stage / file.name)
+                moved.append((saved, file))
+            prepared.replace(path)
+        except OSError:
+            for saved, original in reversed(moved):
+                saved.replace(original)
+            raise
+    return archive / path.name

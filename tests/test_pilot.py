@@ -32,6 +32,7 @@ def test_pilot_keyboard_help_and_selection_survive_navigation(application, tmp_p
         application.processEvents()
         assert [window.navigation.item(i).text() for i in range(window.navigation.count())] == [
             "Автомобили",
+            "Незавершённые ремонты",
             "Клиенты",
             "Звонки",
             "Записи",
@@ -46,10 +47,13 @@ def test_pilot_keyboard_help_and_selection_survive_navigation(application, tmp_p
         assert page.rows[page.table.currentRow()]["id"] == selected
         QTest.keyClick(window, Qt.Key.Key_2, Qt.KeyboardModifier.ControlModifier)
         QTest.keyClick(window, Qt.Key.Key_F, Qt.KeyboardModifier.ControlModifier)
+        assert window.unfinished_repairs_page.search.hasFocus()
+        QTest.keyClick(window, Qt.Key.Key_3, Qt.KeyboardModifier.ControlModifier)
+        QTest.keyClick(window, Qt.Key.Key_F, Qt.KeyboardModifier.ControlModifier)
         assert window.customers_page.search.hasFocus()
-        QTest.keyClick(window, Qt.Key.Key_4, Qt.KeyboardModifier.ControlModifier)
-        assert window.navigation.currentItem().text() == "Записи"
         QTest.keyClick(window, Qt.Key.Key_5, Qt.KeyboardModifier.ControlModifier)
+        assert window.navigation.currentItem().text() == "Записи"
+        QTest.keyClick(window, Qt.Key.Key_6, Qt.KeyboardModifier.ControlModifier)
         assert window.navigation.currentItem().text() == "Настройки"
         before = Path(window.db_path).read_bytes()
         captured = {}
