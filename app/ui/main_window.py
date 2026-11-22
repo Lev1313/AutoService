@@ -3,7 +3,7 @@
 import sqlite3
 from pathlib import Path
 
-from PySide6.QtCore import QDateTime, QSettings, Qt
+from PySide6.QtCore import QDateTime, QSettings, Qt, QTimer
 from PySide6.QtGui import QKeySequence, QPalette, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.database.connection import backup_database, restore_database
+from app.services.drive_backup import read_status
 from app.services.records import Records
 from app.ui.appointments import AppointmentsPage
 from app.ui.customers import CustomersPage
@@ -131,6 +132,10 @@ class MainWindow(QMainWindow):
             self.settings_page(theme),
         ):
             self.pages.addWidget(page)
+        drive_timer = QTimer(self)
+        drive_timer.setInterval(15000)
+        drive_timer.timeout.connect(self.refresh_drive_status)
+        drive_timer.start()
         layout.addWidget(self.pages, 1)
         self.setCentralWidget(root)
         self.workspace.customer_saved.connect(self.refresh_current_page)
@@ -221,6 +226,9 @@ class MainWindow(QMainWindow):
                 True,
             )
         )
+        self.drive_status = label("", "muted", True)
+        storage.addWidget(self.drive_status)
+        self.refresh_drive_status()
 
         documents = self.settings_group(content, "Документы и экспорт")
         receipts = QPushButton("Реквизиты для квитанций")
@@ -266,6 +274,31 @@ class MainWindow(QMainWindow):
             self.appointments_page,
         ):
             page.refresh()
+        elif page is not None:
+            self.refresh_drive_status()
+
+    def refresh_drive_status(self):
+        folder = self.db_path.parent / "drive-backup"
+        if not (folder / "settings.json").is_file():
+            self.drive_status.hide()
+            return
+        self.drive_status.show()
+        try:
+            state = read_status(folder / "status.json")
+        except (OSError, ValueError):
+            self.drive_status.setText("Google Диск · статус недоступен.")
+            return
+        stamp = QDateTime.fromString(state.get("confirmed_at", ""), Qt.DateFormat.ISODate)
+        confirmed = (
+            f"Последняя загрузка подтверждена {stamp.toLocalTime().toString('dd.MM.yyyy HH:mm')}."
+            if stamp.isValid()
+            else "Подтверждённых загрузок пока нет."
+        )
+        pending = state.get("pending", 0)
+        error = state.get("error")
+        self.drive_status.setText(
+            f"Google Диск · {confirmed} В очереди: {pending}." + (f"\n{error}" if error else "")
+        )
 
     def schedule_from_call(self, vehicle_id, reason):
         if self.appointments_page.edit(vehicle_id=vehicle_id, reason=reason):
