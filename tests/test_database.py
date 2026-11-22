@@ -5,6 +5,12 @@ import pytest
 from app.database.connection import SCHEMA_VERSION, initialize_database
 
 
+def set_old_schema(connection, version):
+    connection.execute("ALTER TABLE repairs DROP COLUMN document_items")
+    connection.execute("ALTER TABLE repairs DROP COLUMN recommendations")
+    connection.execute(f"PRAGMA user_version = {version}")
+
+
 def test_initialize_and_reopen_preserves_data(tmp_path):
     path = tmp_path / "nested" / "test.sqlite3"
     initialize_database(path)
@@ -23,7 +29,7 @@ def test_v7_lowercases_saved_plates_after_creating_backup(tmp_path):
     path = tmp_path / "test.sqlite3"
     initialize_database(path)
     with sqlite3.connect(path) as connection:
-        connection.execute("PRAGMA user_version = 7")
+        set_old_schema(connection, 7)
         connection.execute("INSERT INTO vehicles(plate,vin,archived) VALUES ('А123Bc98','VIN',1)")
 
     initialize_database(path)
@@ -44,7 +50,7 @@ def test_v8_uppercases_vin_after_creating_backup(tmp_path):
     path = tmp_path / "test.sqlite3"
     initialize_database(path)
     with sqlite3.connect(path) as connection:
-        connection.execute("PRAGMA user_version = 8")
+        set_old_schema(connection, 8)
         connection.execute("INSERT INTO vehicles(vin,archived) VALUES ('wvwzzz1kzaw000002',1)")
     initialize_database(path)
     with sqlite3.connect(path) as connection:
@@ -55,6 +61,39 @@ def test_v8_uppercases_vin_after_creating_backup(tmp_path):
     (backup,) = (tmp_path / "backups").glob("*.sqlite3")
     with sqlite3.connect(backup) as connection:
         assert connection.execute("SELECT vin FROM vehicles").fetchone() == ("wvwzzz1kzaw000002",)
+
+
+def test_v9_migration_preserves_draft_and_existing_v10_fields(tmp_path):
+    path = tmp_path / "test.sqlite3"
+    initialize_database(path)
+    payload = '{"recommendations":"Проверить тормоза","items":[{"title":"Осмотр"}]}'
+    with sqlite3.connect(path) as connection:
+        set_old_schema(connection, 9)
+        connection.execute("INSERT INTO vehicles(id, plate) VALUES (1, 'тест')")
+        connection.execute(
+            "INSERT INTO repairs(id, vehicle_id, visit_date) VALUES (1, 1, '2026-11-22')"
+        )
+        connection.execute("INSERT INTO document_drafts VALUES (1, ?)", (payload,))
+
+    initialize_database(path)
+    (backup,) = (tmp_path / "backups").glob("*.sqlite3")
+    with sqlite3.connect(backup) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone() == (9,)
+        assert connection.execute("SELECT payload FROM document_drafts").fetchone() == (payload,)
+    with sqlite3.connect(path) as connection:
+        assert connection.execute(
+            "SELECT recommendations, document_items FROM repairs"
+        ).fetchone() == (
+            "Проверить тормоза",
+            '[{"title":"Осмотр"}]',
+        )
+        connection.execute("UPDATE repairs SET recommendations='Записано в схеме 10'")
+    initialize_database(path)
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone() == (10,)
+        assert connection.execute("SELECT recommendations FROM repairs").fetchone() == (
+            "Записано в схеме 10",
+        )
 
 
 @pytest.mark.parametrize("version", [0, SCHEMA_VERSION + 1])

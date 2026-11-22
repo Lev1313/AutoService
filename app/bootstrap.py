@@ -57,10 +57,7 @@ def run() -> int:
         QMessageBox.critical(
             None,
             "Не удалось открыть AutoService",
-            "Не удалось подготовить базу данных. Проверьте доступ к папке:\n"
-            f"{path.parent}\n\n"
-            "Не удаляйте существующую базу.\n\n"
-            f"Подробности: {error}",
+            f"{error}\n\nПапка базы данных — {path.parent}\n\nНе удаляйте существующую базу.",
         )
         return 1
     window.show()

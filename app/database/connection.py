@@ -7,7 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 SCHEMA_V2 = (
     """CREATE TABLE contacts (id INTEGER PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '')""",
@@ -174,7 +174,10 @@ def initialize_database(path: Path) -> None:
         connection.execute("BEGIN IMMEDIATE")
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         if version > SCHEMA_VERSION:
-            raise RuntimeError("База создана более новой версией AutoService. Обновите программу.")
+            raise RuntimeError(
+                f"Схема базы — {version}, эта сборка поддерживает схемы до {SCHEMA_VERSION}. "
+                "Откройте базу в более новой версии AutoService."
+            )
         if version == 0:
             tables = connection.execute(
                 "SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
@@ -223,6 +226,21 @@ def initialize_database(path: Path) -> None:
             connection.execute(
                 "UPDATE vehicles SET vin = vin_uppercase(vin) WHERE vin <> vin_uppercase(vin)"
             )
+        if version < 10:
+            connection.execute(
+                "ALTER TABLE repairs ADD COLUMN recommendations TEXT NOT NULL DEFAULT ''"
+            )
+            connection.execute(
+                "ALTER TABLE repairs ADD COLUMN document_items TEXT NOT NULL DEFAULT '[]'"
+            )
+            # Совместимость с первой сборкой, которая записывала схему 10.
+            connection.execute("""UPDATE repairs SET recommendations=COALESCE(
+                (SELECT json_extract(payload,'$.recommendations') FROM document_drafts
+                 WHERE repair_id=repairs.id AND json_valid(payload)),
+                (SELECT json_extract(payload,'$.recommendations') FROM documents
+                 WHERE repair_id=repairs.id AND json_valid(payload) ORDER BY id DESC LIMIT 1),''),
+                document_items=COALESCE((SELECT json_extract(payload,'$.items') FROM document_drafts
+                WHERE repair_id=repairs.id AND json_valid(payload)),'[]')""")
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         validate_tables(connection)
 
@@ -232,7 +250,8 @@ def validate_tables(connection):
         "SELECT id, make, model, plate, vin, year, notes, contact_id, archived FROM vehicles",
         "SELECT id, name, phone FROM contacts",
         "SELECT id, vehicle_id, contact_id, changed_at FROM vehicle_contacts",
-        "SELECT id, vehicle_id, visit_date, description, amount_kopecks, completed FROM repairs",
+        "SELECT id, vehicle_id, visit_date, description, recommendations, document_items, "
+        "amount_kopecks, completed FROM repairs",
         "SELECT id, vehicle_id, repair_id, recorded_on, km, source, verified "
         "FROM odometer_readings",
         "SELECT id, vehicle_id, title, months, distance_km, lead_days, annual_km, "

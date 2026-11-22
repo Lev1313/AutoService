@@ -1,5 +1,6 @@
 """Квитанции: редактируемый черновик, фактический PDF и сохранённые экземпляры."""
 
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -374,12 +375,14 @@ class DocumentDialog(SafeDialog):
             }
         else:
             self.document_status.setText("Черновик" if editable else "Квитанций нет")
+            repair = self.source_repair()
             with_repair = self.service.draft(self.repair_id)
             with_repair = with_repair or {
                 "kind": "simple",
                 "layout": "service_sheet",
-                "description": self.source_repair()["description"],
-                "items": [],
+                "description": repair["description"],
+                "recommendations": repair["recommendations"],
+                "items": json.loads(repair["document_items"]),
             }
             values = with_repair
         selected_layout = values.get("layout", "receipt")

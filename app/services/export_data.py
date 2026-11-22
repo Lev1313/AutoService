@@ -59,6 +59,8 @@ LABELS = {
     "contact_text": "Контакт / автомобиль со слов клиента",
     "reason": "Причина визита",
     "description": "Описание",
+    "recommendations": "Рекомендации",
+    "document_items": "Позиции документа",
     "amount_kopecks": "Стоимость, копейки",
     "completed": "Завершён (1/0)",
     "state_known": "Статус известен (1/0)",

@@ -16,7 +16,7 @@
 Python 3.13 x64 использовался для проверок и Windows-сборки. Версии библиотек
 зафиксированы в `requirements.txt` и `requirements-build.txt`.
 
-## SQLite v9
+## SQLite v10
 
 `app_metadata` идентифицирует формат, `PRAGMA user_version` задаёт версию.
 
