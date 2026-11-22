@@ -352,7 +352,7 @@ class MainWindow(QMainWindow):
             return
         try:
             safety_copy = restore_database(self.db_path, Path(filename))
-        except (OSError, ValueError, RuntimeError) as error:
+        except (OSError, ValueError, RuntimeError, sqlite3.Error) as error:
             QMessageBox.warning(self, "Не удалось восстановить данные", str(error))
             return
         self.vehicles_page.refresh()

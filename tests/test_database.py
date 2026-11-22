@@ -1,8 +1,9 @@
 import sqlite3
+from hashlib import sha256
 
 import pytest
 
-from app.database.connection import SCHEMA_VERSION, initialize_database
+from app.database.connection import SCHEMA_VERSION, initialize_database, restore_database
 
 
 def set_old_schema(connection, version):
@@ -118,3 +119,39 @@ def test_invalid_identity_is_not_modified(tmp_path):
     with pytest.raises(RuntimeError):
         initialize_database(path)
     assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    ("statement", "message"),
+    [
+        ("DELETE FROM document_files", "отсутствует PDF документа ТЕСТ-1"),
+        ("UPDATE document_files SET content = X'01'", "повреждён PDF документа ТЕСТ-1"),
+        ("UPDATE import_sources SET original_bytes = X'01'", "повреждён исходный TXT №1"),
+    ],
+)
+def test_restore_rejects_missing_or_changed_attachments(tmp_path, statement, message):
+    working = tmp_path / "working.sqlite3"
+    source = tmp_path / "copy.sqlite3"
+    initialize_database(working)
+    initialize_database(source)
+    with sqlite3.connect(source) as connection:
+        connection.execute("INSERT INTO vehicles(id, plate) VALUES (1, 'тест')")
+        connection.execute("INSERT INTO repairs(id, vehicle_id) VALUES (1,1)")
+        connection.execute("INSERT INTO documents VALUES (1,'ТЕСТ-1',1,'2026-11-22','simple','{}')")
+        pdf = b"%PDF-test"
+        txt = b"test TXT"
+        connection.execute(
+            "INSERT INTO document_files VALUES (1,?,?)", (pdf, sha256(pdf).hexdigest())
+        )
+        connection.execute(
+            "INSERT INTO import_sources VALUES (1,?,?,'test','utf-8','test.txt','2026-11-22')",
+            (sha256(txt).hexdigest(), txt),
+        )
+        connection.execute(statement)
+    original = working.read_bytes()
+    original_copy = source.read_bytes()
+    with pytest.raises(ValueError, match=message):
+        restore_database(working, source)
+    assert working.read_bytes() == original
+    assert source.read_bytes() == original_copy
+    assert not (tmp_path / "backups").exists()
