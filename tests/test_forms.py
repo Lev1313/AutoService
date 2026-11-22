@@ -36,6 +36,7 @@ def test_vehicle_and_repair_forms_persist_through_actual_buttons(application, re
     application.processEvents()
     text = "Заменили масло.\nРекомендовано проверить тормоза.\n" * 20
     editor.description.setPlainText(text)
+    editor.recommendations.setPlainText("Проверить ремень.\nОсмотреть ролики.")
     editor.mileage.setText("120 000")
     editor.amount.setText("1 500,50")
     QTest.mouseClick(editor.save_button, Qt.MouseButton.LeftButton)
@@ -53,7 +54,10 @@ def test_vehicle_and_repair_forms_persist_through_actual_buttons(application, re
     card.show()
     application.processEvents()
     assert card.history.rowCount() == 1
-    assert card.preview.toPlainText() == text
+    assert (
+        card.preview.toPlainText()
+        == text + "\n\nРекомендации\nПроверить ремень.\nОсмотреть ролики."
+    )
     assert "120 000" in card.summary.text()
     card.close()
 
@@ -282,6 +286,8 @@ def test_vehicle_header_sorting_and_selection(application, records, monkeypatch)
         point = header.viewport().rect().center()
         point.setX(header.sectionViewportPosition(column) + header.sectionSize(column) // 2)
         QTest.mouseClick(header.viewport(), Qt.MouseButton.LeftButton, pos=point)
+        assert page.table.currentRow() == 0
+        assert page.table.verticalScrollBar().value() == 0
 
     def ids():
         return [row["id"] for row in page.rows]

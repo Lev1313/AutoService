@@ -737,14 +737,15 @@ class VehicleCard(QDialog):
         self.delete_button.setText(
             "Восстановить ремонт" if selected and selected["deleted_at"] else "Удалить ремонт"
         )
-        self.preview.setPlainText(
-            (
-                ("Удалён: " + selected["deleted_at"] + "\n")
-                if selected and selected["deleted_at"]
-                else ""
-            )
-            + (selected["description"] if selected else "")
-        )
+        sections = []
+        if selected:
+            if selected["deleted_at"]:
+                sections.append("Удалён: " + selected["deleted_at"])
+            if selected["description"]:
+                sections.append(selected["description"])
+            if selected["recommendations"]:
+                sections.append("Рекомендации\n" + selected["recommendations"])
+        self.preview.setPlainText("\n\n".join(sections))
 
     def open_source(self):
         from app.ui.txt_import import SourceDialog
@@ -983,6 +984,9 @@ class VehiclesPage(QWidget):
             self.sort_descending = column == self.sort_column and not self.sort_descending
             self.sort_column = column
             self.refresh()
+            if self.table.rowCount():
+                self.table.selectRow(0)
+                self.table.scrollToTop()
         order = (
             Qt.SortOrder.DescendingOrder if self.sort_descending else Qt.SortOrder.AscendingOrder
         )
