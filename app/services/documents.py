@@ -7,7 +7,7 @@ from hashlib import sha256
 from uuid import uuid4
 
 from app.database.connection import connect
-from app.services.records import parse_amount
+from app.services.records import check_repair_notes, parse_amount
 
 SETTINGS = ("name", "address", "phone", "requisites")
 
@@ -106,14 +106,19 @@ class Documents:
             ).fetchone()
         return json.loads(row[0]) if row else None
 
-    def save_draft(self, repair_id, values):
+    def save_draft(self, repair_id, values, *, expected_notes=None):
         # Черновик допускает незаполненные поля; документ проверяется отдельно.
         with connect(self.path) as connection:
-            row = connection.execute(
-                "SELECT deleted_at FROM repairs WHERE id=?", (repair_id,)
-            ).fetchone()
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM repairs WHERE id=?", (repair_id,)).fetchone()
             if row is None or row["deleted_at"]:
                 raise ValueError("Ремонт не найден или удалён. Сначала восстановите его.")
+            check_repair_notes(row, expected_notes)
+            connection.execute(
+                "UPDATE repairs SET description=COALESCE(?,description), "
+                "recommendations=COALESCE(?,recommendations) WHERE id=?",
+                (values.get("description"), values.get("recommendations"), repair_id),
+            )
             connection.execute(
                 "INSERT INTO document_drafts(repair_id,payload) VALUES (?,?) "
                 "ON CONFLICT(repair_id) DO UPDATE SET payload=excluded.payload",
@@ -131,7 +136,8 @@ class Documents:
         *,
         consume_draft=False,
         layout="receipt",
-        recommendations="",
+        recommendations=None,
+        expected_notes=None,
     ):
         if kind not in ("simple", "detailed"):
             raise ValueError("Выберите формат квитанции.")
@@ -152,6 +158,7 @@ class Documents:
                 )
             if repair is None:
                 raise ValueError("Сначала сохраните ремонт.")
+            check_repair_notes(repair, expected_notes)
             vehicle = connection.execute(
                 """SELECT v.*, c.name AS contact_name, c.phone FROM vehicles v
                 LEFT JOIN contacts c ON c.id=v.contact_id WHERE v.id=?""",
@@ -173,7 +180,9 @@ class Documents:
             payload = {
                 "schema": 1,
                 "layout": layout,
-                "recommendations": str(recommendations),
+                "recommendations": repair["recommendations"]
+                if recommendations is None
+                else str(recommendations),
                 "repair": dict(repair),
                 "vehicle": dict(vehicle),
                 "service": {key: stored_settings.get(key, "") for key in SETTINGS},
@@ -216,6 +225,10 @@ class Documents:
                 (document_id, content, sha256(content).hexdigest()),
             )
             if consume_draft:
+                connection.execute(
+                    "UPDATE repairs SET description=?, recommendations=? WHERE id=?",
+                    (payload["description"], payload["recommendations"], repair_id),
+                )
                 connection.execute("DELETE FROM document_drafts WHERE repair_id=?", (repair_id,))
         return self.get(document_id)
 

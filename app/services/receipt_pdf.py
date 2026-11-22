@@ -86,10 +86,18 @@ def build_pdf(document: dict) -> bytes:
     # Только первая страница содержит шапку и увеличенный верхний отступ.
     flow = [Spacer(1, 151 - 16 * mm)]
     if service["name"]:
-        flow.append(paragraph(service["name"], section))
+        flow.append(
+            paragraph(
+                service["name"], ParagraphStyle("ServiceName", parent=section, alignment=TA_RIGHT)
+            )
+        )
     for key in ("address", "phone", "requisites"):
         if service[key]:
-            flow.append(paragraph(service[key], small))
+            flow.append(
+                paragraph(
+                    service[key], ParagraphStyle("ServiceDetails", parent=small, alignment=TA_RIGHT)
+                )
+            )
     flow.append(Spacer(1, 4 * mm))
     flow.append(paragraph(f"Квитанция {document['number']}", heading))
     flow.append(paragraph(f"Составлена: {human_date(document['created_at'][:10])}"))
@@ -127,6 +135,10 @@ def build_pdf(document: dict) -> bytes:
     # Отдельные абзацы позволяют переносить длинную запись на несколько страниц.
     for line in (data["description"] or "Описание не указано").splitlines():
         flow.append(paragraph(line or " "))
+    if data.get("recommendations", "").strip():
+        flow.append(paragraph("Рекомендации", section))
+        for line in data["recommendations"].splitlines():
+            flow.append(paragraph(line or " "))
     if document["kind"] == "detailed":
         flow.append(paragraph("Работы и запчасти", section))
         has_prices = data["total_kopecks"] is not None
@@ -174,8 +186,9 @@ def build_pdf(document: dict) -> bytes:
         if has_prices:
             total = amount_text(data["total_kopecks"])
             caption = item_total_label(data["items"])
+            total_style = ParagraphStyle("Total", parent=heading, alignment=TA_RIGHT)
             flow.append(
-                KeepTogether([Spacer(1, 7 * mm), paragraph(f"{caption}: {total} ₽", heading)])
+                KeepTogether([Spacer(1, 7 * mm), paragraph(f"{caption}: {total} ₽", total_style)])
             )
 
     def footer(canvas, doc):

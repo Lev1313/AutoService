@@ -5,7 +5,7 @@
 
 ## Скачать и запустить
 
-Версия исходников — **0.5.17**. Последний опубликованный выпуск — **0.5.10**.
+Версия этой рабочей ветки — **0.5.21**. Последний опубликованный выпуск — **0.5.17**.
 [Скачать переносимый ZIP, PDF и контрольные суммы][release].
 
 1. Распакуйте весь ZIP в отдельную папку. Для работы нужен Windows x64, Python устанавливать не требуется.
@@ -65,4 +65,4 @@ py -3.13 -m venv .venv
 - [Архитектура](docs/architecture.md) и [требования](docs/requirements.md)
 - [Настройка окружения](docs/environment.md), [синхронизация GitHub](docs/GITHUB.md) и [сборка Windows](docs/WINDOWS-RELEASE.md)
 
-[release]: https://github.com/Lev1313/AutoService/releases/tag/v0.5.10
+[release]: https://github.com/Lev1313/AutoService/releases/tag/v0.5.17

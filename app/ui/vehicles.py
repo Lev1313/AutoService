@@ -373,10 +373,16 @@ class RepairDialog(SafeDialog):
         self.amount.setPlaceholderText("Пусто — неизвестно; 0 — бесплатно")
         form.addRow("Общая стоимость, ₽", self.amount)
         layout.addLayout(form)
-        layout.addWidget(plain_label("Что сделали, обнаружили, рекомендуете"))
+        layout.addWidget(plain_label("Ход работ"))
         self.description = QPlainTextEdit(self.repair.get("description", ""))
-        self.description.setAccessibleName("Описание ремонта")
+        self.description.setAccessibleName("Ход работ")
         layout.addWidget(self.description, 1)
+        layout.addWidget(plain_label("Рекомендации"))
+        self.recommendations = QPlainTextEdit(self.repair.get("recommendations", ""))
+        self.recommendations.setAccessibleName("Рекомендации")
+        layout.addWidget(self.recommendations, 1)
+        self.suggest_recommendations()
+        self.visit_date.dateChanged.connect(self.suggest_recommendations)
         self.save_notice = plain_label("")
         self.save_notice.hide()
         layout.addWidget(self.save_notice)
@@ -404,6 +410,14 @@ class RepairDialog(SafeDialog):
         self.finish_button.setVisible(not self.repair.get("completed", False))
         layout.addLayout(row)
         self.prepare_guard()
+
+    def suggest_recommendations(self):
+        if not self.repair and not self.recommendations.document().isModified():
+            self.recommendations.setPlainText(
+                self.records.previous_recommendations(
+                    self.vehicle_id, self.visit_date.date().toString("yyyy-MM-dd")
+                )
+            )
 
     def show_mileage_note(self):
         note = ""
@@ -471,6 +485,7 @@ class RepairDialog(SafeDialog):
             "carried_on": carried_on,
             "amount": self.amount.text(),
             "description": self.description.toPlainText(),
+            "recommendations": self.recommendations.toPlainText(),
         }
         if self.repair.get("origin") == "txt":
             values["mileage_verified"] = self.mileage_verified.isChecked()
@@ -521,6 +536,7 @@ class RepairDialog(SafeDialog):
                 self.repair.get("id"),
                 allow_unverified=allow_unverified,
                 appointment_id=self.appointment["id"] if self.appointment else None,
+                expected_notes=self.repair,
             )
         except ERRORS as error:
             QMessageBox.warning(self, "Не удалось сохранить ремонт", str(error))
@@ -867,7 +883,20 @@ def open_repair_window(records, vehicle_id, owner, repair=None, *, appointment=N
         editor = RepairDialog(records, vehicle_id, repair, appointment=appointment)
 
         def saved(repair_id):
+            from app.ui.documents import DocumentDialog
+
             workspace.dialogs[editor] = (RepairDialog, repair_id)
+            document = workspace.find((DocumentDialog, repair_id))
+            if document and not document.current_document:
+                for key in ("description", "recommendations"):
+                    widget = getattr(document, key)
+                    if (
+                        editor.repair[key] != document.expected_notes[key]
+                        and widget.toPlainText() == document.original[key]
+                    ):
+                        widget.setPlainText(editor.repair[key])
+                        document.original[key] = editor.repair[key]
+                        document.expected_notes[key] = editor.repair[key]
             workspace.repair_saved.emit(vehicle_id, repair_id)
 
         editor.repair_saved.connect(saved)
@@ -879,9 +908,27 @@ def open_repair_window(records, vehicle_id, owner, repair=None, *, appointment=N
 def open_document_window(records, repair_id, owner):
     from app.ui.documents import DocumentDialog
 
-    return work_windows(owner).open(
-        (DocumentDialog, repair_id), lambda: DocumentDialog(records, repair_id)
-    )
+    workspace = work_windows(owner)
+
+    def create():
+        dialog = DocumentDialog(records, repair_id)
+
+        def refresh_repair():
+            editor = workspace.find((RepairDialog, repair_id))
+            repair = dialog.source_repair()
+            if editor:
+                for key in ("description", "recommendations"):
+                    widget = getattr(editor, key)
+                    if widget.toPlainText() == editor.original[key]:
+                        widget.setPlainText(repair[key])
+                        editor.original[key] = repair[key]
+                        editor.repair[key] = repair[key]
+            workspace.repair_saved.emit(repair["vehicle_id"], repair_id)
+
+        dialog.notes_saved.connect(refresh_repair)
+        return dialog
+
+    return workspace.open((DocumentDialog, repair_id), create)
 
 
 class VehiclesPage(QWidget):

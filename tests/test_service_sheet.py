@@ -1,13 +1,14 @@
 import pytest
-from PySide6.QtCore import QBuffer, QIODevice, QRect, QSize
+from PySide6.QtCore import QBuffer, QDate, QIODevice, QRect, QSize
 from PySide6.QtPdf import QPdfDocument
-from PySide6.QtWidgets import QLabel
+from PySide6.QtWidgets import QLabel, QWidget
 
 from app.database.connection import initialize_database
 from app.services.documents import Documents
 from app.services.receipt_pdf import pdf_bytes
 from app.services.records import Records
 from app.ui.documents import DocumentDialog
+from app.ui.vehicles import RepairDialog, open_document_window, open_repair_window
 
 
 def setup_repair(tmp_path):
@@ -42,6 +43,58 @@ def open_pdf(content):
     pdf.load(buffer)
     assert pdf.status() == QPdfDocument.Status.Ready
     return pdf, buffer
+
+
+def test_repair_notes_follow_vehicle_and_date(application, tmp_path):
+    records, documents, car, repair = setup_repair(tmp_path)
+    editor = RepairDialog(records, car, records.repairs(car)[0])
+    editor.recommendations.setPlainText("Осмотреть ремень")
+    assert editor.save(close=False)
+    editor.close()
+    dialog = DocumentDialog(records, repair)
+    assert dialog.recommendations.toPlainText() == "Осмотреть ремень"
+    dialog.recommendations.setPlainText("Проверить натяжение")
+    assert dialog.save(close=False)
+    assert dialog.create()
+    issued = dialog.content
+    dialog.close()
+    assert records.repairs(car)[0]["recommendations"] == "Проверить натяжение"
+    next_visit = RepairDialog(records, car)
+    next_visit.visit_date.setDate(QDate(2026, 11, 20))
+    assert next_visit.recommendations.toPlainText() == ""
+    next_visit.visit_date.setDate(QDate(2026, 11, 22))
+    assert next_visit.recommendations.toPlainText() == "Проверить натяжение"
+    assert not next_visit.description.toPlainText()
+    next_visit.recommendations.selectAll()
+    next_visit.recommendations.insertPlainText("Выполнено")
+    next_visit.visit_date.setDate(QDate(2026, 11, 23))
+    assert next_visit.recommendations.toPlainText() == "Выполнено"
+    next_visit.recommendations.clear()
+    assert next_visit.save(close=False)
+    next_visit.close()
+    assert records.previous_recommendations(car, "2026-11-24") == ""
+    other = records.save_vehicle({"plate": "учебный2"})
+    assert records.previous_recommendations(other, "2026-11-22") == ""
+    assert documents.pdf_content(documents.history(repair)[0]["id"]) == issued
+
+
+def test_shared_notes_in_two_open_windows(application, tmp_path):
+    records, service, car, repair_id = setup_repair(tmp_path)
+    owner = QWidget()
+    editor = open_repair_window(records, car, owner, records.repairs(car)[0])
+    document = open_document_window(records, repair_id, editor)
+    editor.recommendations.setPlainText("Из окна ремонта")
+    assert editor.save(close=False)
+    assert document.recommendations.toPlainText() == "Из окна ремонта"
+    document.description.setPlainText("Из документа")
+    assert document.save(close=False)
+    assert editor.description.toPlainText() == "Из документа"
+    editor.recommendations.setPlainText("Сверить на следующем визите")
+    assert editor.save(close=False)
+    assert service.draft(repair_id)["recommendations"] == editor.recommendations.toPlainText()
+    document.close()
+    editor.close()
+    owner.close()
 
 
 def test_sheet_fields_no_prices_and_immutable_snapshot(application, tmp_path):
@@ -79,7 +132,7 @@ def test_sheet_fields_no_prices_and_immutable_snapshot(application, tmp_path):
     assert receipt["number"] == "КВ-000002"
 
 
-def test_both_pdf_formats_share_original_full_header(application, tmp_path):
+def test_both_pdf_formats_share_right_aligned_header(application, tmp_path):
     _, service, _, repair = setup_repair(tmp_path)
     size = QSize(1191, 1684)
     bounds = QRect(170, 112, 965, 182)
@@ -93,6 +146,21 @@ def test_both_pdf_formats_share_original_full_header(application, tmp_path):
         buffer.close()
 
     assert headers[0] == headers[1]
+    # Правая граница краски каждой из шести строк шапки, рендер в масштабе 2:1.
+    ends = []
+    for top, bottom in ((22, 42), (54, 69), (75, 88), (99, 111), (118, 129), (136, 147)):
+        ends.append(
+            max(
+                x
+                for x in range(715, bounds.width())
+                if any(
+                    color.alpha() > 200 and color.lightness() < 145
+                    for y in range(round(1.135 * top), round(1.135 * bottom) + 2)
+                    for color in (headers[0].pixelColor(x, y),)
+                )
+            )
+        )
+    assert max(ends) - min(ends) <= 3
     # Светлые и тёмные участки есть и слева с рисунком, и справа с контактами.
     for start, end in ((0, 480), (710, bounds.width())):
         assert any(
@@ -185,6 +253,12 @@ def test_document_prices_are_optional_and_survive_draft_and_issue(application, t
     assert text.index("Фильтр <тест>") < text.index("Замена фильтра")
     assert "100,01" in text and "200,02" in text
     assert "Итого по указанным ценам" in text
+    start = text.index("Итого по указанным ценам")
+    end = text.index("₽", start)
+    assert (
+        reopened.pdf.getSelectionAtIndex(0, start, end - start + 1).boundingRectangle().right()
+        > 530
+    )
     assert "Получение оплаты" not in text
     assert reopened.create()
     original = reopened.content

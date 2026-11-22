@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QBuffer, QIODevice, QRectF, QSignalBlocker, QSize, Qt, QTimer
+from PySide6.QtCore import QBuffer, QIODevice, QRectF, QSignalBlocker, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QPageSize, QPainter, QShortcut
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPdfWidgets import QPdfView
@@ -118,6 +118,8 @@ class DocumentSettingsDialog(SafeDialog):
 
 
 class DocumentDialog(SafeDialog):
+    notes_saved = Signal()
+
     def __init__(self, records, repair_id, parent=None):
         super().__init__(parent)
         self.service = Documents(records.path)
@@ -156,17 +158,17 @@ class DocumentDialog(SafeDialog):
         self.kind.addItem("Новый формат: квитанция", "receipt")
         self.kind.currentIndexChanged.connect(self.changed)
         left.addWidget(self.kind)
-        left.addWidget(plain_label("Описание для документа"))
+        left.addWidget(plain_label("Ход работ"))
         self.description = QPlainTextEdit()
         self.description.textChanged.connect(self.changed)
         left.addWidget(self.description, 1)
         self.recommendations_panel = QWidget()
         recommendations_layout = QVBoxLayout(self.recommendations_panel)
         recommendations_layout.setContentsMargins(0, 0, 0, 0)
-        recommendations_layout.addWidget(plain_label("Рекомендации для сервисного листа"))
+        recommendations_layout.addWidget(plain_label("Рекомендации"))
         self.recommendations = QPlainTextEdit()
         self.recommendations.setPlaceholderText(
-            "Необязательно. Сохраняются в черновике и документе."
+            "Сохраняются в ремонте и переносятся в следующий визит этой машины."
         )
         self.recommendations.setMaximumHeight(self.recommendations.minimumSizeHint().height())
         self.recommendations.textChanged.connect(self.changed)
@@ -376,6 +378,7 @@ class DocumentDialog(SafeDialog):
         else:
             self.document_status.setText("Черновик" if editable else "Квитанций нет")
             repair = self.source_repair()
+            self.expected_notes = repair
             with_repair = self.service.draft(self.repair_id)
             with_repair = with_repair or {
                 "kind": "simple",
@@ -393,7 +396,6 @@ class DocumentDialog(SafeDialog):
             table.setRowCount(0)
         for row in values["items"]:
             self.add_item(row.get("kind", "work"), values=row)
-        self.recommendations_panel.setVisible(selected_layout == "service_sheet")
         self.original = self.state()
         self.busy = False
         self.update_total()
@@ -501,7 +503,6 @@ class DocumentDialog(SafeDialog):
     def changed(self, *_):
         if self.busy:
             return
-        self.recommendations_panel.setVisible(self.kind.currentData() == "service_sheet")
         self.clear_preview("Обновляем предпросмотр…")
         self.document_status.setText("Черновик")
         self.message.setText("Документ получит номер при оформлении.")
@@ -549,7 +550,9 @@ class DocumentDialog(SafeDialog):
         value = self.state()
         try:
             try:
-                result = self.service.create(self.repair_id, **value, consume_draft=True)
+                result = self.service.create(
+                    self.repair_id, **value, consume_draft=True, expected_notes=self.expected_notes
+                )
             except TotalMismatch as error:
                 if (
                     QMessageBox.question(
@@ -563,12 +566,17 @@ class DocumentDialog(SafeDialog):
                 ):
                     return False
                 result = self.service.create(
-                    self.repair_id, **value, allow_difference=True, consume_draft=True
+                    self.repair_id,
+                    **value,
+                    allow_difference=True,
+                    consume_draft=True,
+                    expected_notes=self.expected_notes,
                 )
         except (*ERRORS, RuntimeError) as error:
             QMessageBox.warning(self, "Не удалось оформить документ", str(error))
             return False
         self.current_document = result
+        self.notes_saved.emit()
         self.preview_timer.stop()
         self.create_button.setEnabled(False)
         self.clear_preview()
@@ -587,7 +595,11 @@ class DocumentDialog(SafeDialog):
         self.commit_item_editor()
         try:
             if not self.current_document:
-                self.service.save_draft(self.repair_id, self.state())
+                self.service.save_draft(
+                    self.repair_id, self.state(), expected_notes=self.expected_notes
+                )
+                self.expected_notes = self.source_repair()
+                self.notes_saved.emit()
             self.original = self.state()
         except ERRORS as error:
             QMessageBox.warning(self, "Не удалось сохранить черновик", str(error))

@@ -110,6 +110,33 @@ def test_unknown_database_is_not_modified(tmp_path, version):
     assert path.read_bytes() == original
 
 
+def test_notes_from_0520_draft_recovered_once(tmp_path):
+    path = tmp_path / "legacy.sqlite3"
+    initialize_database(path)
+    with sqlite3.connect(path) as db:
+        db.execute("DELETE FROM app_metadata WHERE key='repair_notes_synced'")
+        db.execute("INSERT INTO vehicles(id,plate) VALUES (1,'учебный')")
+        db.execute("INSERT INTO repairs(id,vehicle_id) VALUES (1,1),(2,1)")
+        db.execute(
+            "INSERT INTO document_drafts VALUES (1,?)", ('{"recommendations":"Из черновика"}',)
+        )
+        db.execute(
+            "INSERT INTO documents VALUES (1,'СЛ-1',2,'2026-11-22','simple',?)",
+            ('{"layout":"service_sheet","recommendations":"Из листа"}',),
+        )
+    initialize_database(path)
+    assert len(list((tmp_path / "backups").glob("*.sqlite3"))) == 1
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT recommendations FROM repairs ORDER BY id").fetchall() == [
+            ("Из черновика",),
+            ("Из листа",),
+        ]
+        db.execute("UPDATE repairs SET recommendations=''")
+    initialize_database(path)
+    with sqlite3.connect(path) as db:
+        assert not db.execute("SELECT 1 FROM repairs WHERE recommendations<>''").fetchone()
+
+
 def test_invalid_identity_is_not_modified(tmp_path):
     path = tmp_path / "other.sqlite3"
     initialize_database(path)

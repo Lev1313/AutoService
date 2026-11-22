@@ -243,6 +243,30 @@ def initialize_database(path: Path) -> None:
                  WHERE repair_id=repairs.id AND json_valid(payload) ORDER BY id DESC LIMIT 1),''),
                 document_items=COALESCE((SELECT json_extract(payload,'$.items') FROM document_drafts
                 WHERE repair_id=repairs.id AND json_valid(payload)),'[]')""")
+        # В 0.5.20 редактор документов сохранял новые рекомендации отдельно от ремонта.
+        if not connection.execute(
+            "SELECT 1 FROM app_metadata WHERE key='repair_notes_synced'"
+        ).fetchone():
+            if version == 10:
+                connection.execute("""CREATE TEMP TABLE recovered_notes AS
+                    SELECT id, COALESCE(
+                        (SELECT json_extract(payload,'$.recommendations') FROM document_drafts
+                         WHERE repair_id=r.id AND json_valid(payload)),
+                        (SELECT CASE WHEN r.recommendations=COALESCE(
+                            json_extract(payload,'$.repair.recommendations'),'')
+                            THEN json_extract(payload,'$.recommendations') END FROM documents
+                         WHERE repair_id=r.id AND json_valid(payload)
+                         AND json_extract(payload,'$.layout')='service_sheet'
+                         ORDER BY id DESC LIMIT 1)
+                    ) AS notes FROM repairs r""")
+                changed = """SELECT n.id FROM recovered_notes n JOIN repairs r ON r.id=n.id
+                             WHERE n.notes IS NOT NULL AND n.notes<>r.recommendations"""
+                if connection.execute(f"SELECT EXISTS({changed})").fetchone()[0]:
+                    backup_database(path)
+                    connection.execute("""UPDATE repairs SET recommendations=n.notes
+                        FROM recovered_notes n WHERE n.id=repairs.id AND n.notes IS NOT NULL
+                        AND n.notes<>repairs.recommendations""")
+            connection.execute("INSERT INTO app_metadata VALUES ('repair_notes_synced','1')")
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         validate_tables(connection)
 
