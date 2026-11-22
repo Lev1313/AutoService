@@ -1,4 +1,4 @@
-"""Квитанции: редактируемый черновик, фактический PDF и сохранённые экземпляры."""
+"""Заказ-наряды: редактируемый черновик, фактический PDF и сохранённые экземпляры."""
 
 import json
 from datetime import datetime
@@ -74,7 +74,7 @@ class DocumentSettingsDialog(SafeDialog):
     def __init__(self, service, parent=None):
         super().__init__(parent)
         self.service = service
-        self.setWindowTitle("Реквизиты для квитанций")
+        self.setWindowTitle("Реквизиты для заказ-нарядов")
         self.resize(540, 390)
         layout = QVBoxLayout(self)
         layout.addWidget(
@@ -136,7 +136,7 @@ class DocumentDialog(SafeDialog):
         self.document_status = plain_label("")
         self.document_status.setWordWrap(False)
         self.document_status.setObjectName("badge")
-        self.document_status.setAccessibleName("Статус квитанции")
+        self.document_status.setAccessibleName("Статус заказ-наряда")
         layout.addWidget(self.document_status, alignment=Qt.AlignmentFlag.AlignLeft)
         history_row = QHBoxLayout()
         history_label = plain_label("Оформленные документы")
@@ -155,7 +155,7 @@ class DocumentDialog(SafeDialog):
         left.setContentsMargins(0, 0, 8, 0)
         self.kind = QComboBox()
         self.kind.addItem("Старый формат: сервисный лист «Фольц Мастер»", "service_sheet")
-        self.kind.addItem("Новый формат: квитанция", "receipt")
+        self.kind.addItem("Новый формат: заказ-наряд", "receipt")
         self.kind.currentIndexChanged.connect(self.changed)
         left.addWidget(self.kind)
         left.addWidget(plain_label("Ход работ"))
@@ -282,7 +282,7 @@ class DocumentDialog(SafeDialog):
         self.history.blockSignals(True)
         self.history.clear()
         for document in documents:
-            kind = "Квитанция"
+            kind = "Заказ-наряд"
             if document["number"].startswith("СЛ-"):
                 kind = "Сервисный лист"
             stamp = datetime.fromisoformat(document["created_at"]).strftime("%d.%m.%Y %H:%M")
@@ -327,8 +327,8 @@ class DocumentDialog(SafeDialog):
             self.apply_selection(index)
         except (*ERRORS, RuntimeError) as error:
             self.busy = False
-            self.document_status.setText("Квитанция недоступна")
-            self.clear_preview("Квитанцию не удалось открыть.")
+            self.document_status.setText("Заказ-наряд недоступен")
+            self.clear_preview("Заказ-наряд не удалось открыть.")
             self.original = self.state()
             QMessageBox.warning(self, "Не удалось открыть документ", str(error))
 
@@ -376,7 +376,7 @@ class DocumentDialog(SafeDialog):
                 ],
             }
         else:
-            self.document_status.setText("Черновик" if editable else "Квитанций нет")
+            self.document_status.setText("Черновик" if editable else "Заказ-нарядов нет")
             repair = self.source_repair()
             self.expected_notes = repair
             with_repair = self.service.draft(self.repair_id)
@@ -407,8 +407,8 @@ class DocumentDialog(SafeDialog):
             self.preview()
         else:
             self.clear_preview(
-                "Для этого ремонта ещё нет оформленных квитанций. "
-                "Чтобы создать квитанцию, восстановите ремонт."
+                "Для этого ремонта ещё нет оформленных заказ-нарядов. "
+                "Чтобы создать заказ-наряд, восстановите ремонт."
             )
             self.message.clear()
 
@@ -584,7 +584,7 @@ class DocumentDialog(SafeDialog):
             self.load_history(result["id"])
             self.load_selection(self.history.currentIndex())
         except (*ERRORS, RuntimeError) as error:
-            QMessageBox.warning(self, f"Квитанция {result['number']} оформлена", str(error))
+            QMessageBox.warning(self, f"Заказ-наряд {result['number']} оформлен", str(error))
         return self.content is not None
 
     def print_or_create(self):
@@ -666,7 +666,7 @@ class DocumentDialog(SafeDialog):
                 self,
                 "Нет доступных принтеров",
                 "Добавьте принтер в Windows и проверьте службу «Диспетчер печати». "
-                "Квитанцию можно выгрузить кнопкой «Сохранить PDF».",
+                "Заказ-наряд можно выгрузить кнопкой «Сохранить PDF».",
             )
             return
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
@@ -683,7 +683,7 @@ class DocumentDialog(SafeDialog):
                     "Не удалось напечатать",
                     f"{error}\n\nПринтер: {printer.printerName() or 'не выбран'}. "
                     "Проверьте подключение, бумагу и очередь печати в Windows. "
-                    "Квитанцию можно выгрузить кнопкой «Сохранить PDF».",
+                    "Заказ-наряд можно выгрузить кнопкой «Сохранить PDF».",
                 )
             else:
                 self.message.setText(
@@ -692,5 +692,5 @@ class DocumentDialog(SafeDialog):
 
         else:
             self.message.setText(
-                f"Печать отменена. Квитанция {self.current_document['number']} сохранена."
+                f"Печать отменена. Заказ-наряд {self.current_document['number']} сохранён."
             )

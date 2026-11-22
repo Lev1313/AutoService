@@ -118,7 +118,7 @@ def test_sheet_fields_no_prices_and_immutable_snapshot(application, tmp_path):
         "Учебная рекомендация",
     ):
         assert value in text
-    assert "9876" not in text and "Итого" not in text and "Квитанция" not in text
+    assert "9876" not in text and "Итого" not in text and "Заказ-наряд" not in text
     pdf.close()
     buffer.close()
     records.save_vehicle(records.vehicle(car) | {"plate": "ДРУГОЙ"}, car)
@@ -203,7 +203,7 @@ def test_sheet_draft_reopen_issue_and_history(application, tmp_path):
     records, service, _, repair = setup_repair(tmp_path)
     dialog = DocumentDialog(records, repair)
     assert dialog.kind.currentData() == "service_sheet"
-    assert "Квитанция" not in dialog.pdf.getAllText(0).text()
+    assert "Заказ-наряд" not in dialog.pdf.getAllText(0).text()
     dialog.recommendations.setPlainText("Сохранённая рекомендация")
     dialog.save(close=False)
     dialog.reject()

@@ -774,7 +774,7 @@ class VehicleCard(QDialog):
                 text += (
                     "Убрать ремонт из истории? Его можно восстановить. "
                     "Замер этого ремонта перестанет определять текущий пробег.\n"
-                    f"Сохранены: квитанции — {links['documents']}, TXT — {links['sources']}.\n"
+                    f"Сохранены: заказ-наряды — {links['documents']}, TXT — {links['sources']}.\n"
                 )
                 if links["maintenance"]:
                     text += (
@@ -957,7 +957,14 @@ class VehiclesPage(QWidget):
         self.current_only = QCheckBox("Только автомобили с текущим ремонтом")
         self.current_only.toggled.connect(self.refresh)
         layout.addWidget(self.current_only)
-        self.table = make_table(("Автомобиль", "Госномер", "Контакт", "Телефон"))
+        self.table = make_table(("Название", "Госномер", "Контакт", "Телефон"))
+        self.sort_column = 0
+        self.sort_descending = False
+        header = self.table.horizontalHeader()
+        header.setSectionsClickable(True)
+        header.setSortIndicator(0, Qt.SortOrder.AscendingOrder)
+        header.setSortIndicatorShown(True)
+        header.sectionClicked.connect(self.sort_vehicles)
         self.table.setAccessibleName("Автомобили")
         self.table.cellDoubleClicked.connect(lambda *_: self.open_vehicle())
         layout.addWidget(self.table, 1)
@@ -971,6 +978,16 @@ class VehiclesPage(QWidget):
         enter.activated.connect(self.open_vehicle)
         self.refresh()
 
+    def sort_vehicles(self, column):
+        if column in (0, 1):
+            self.sort_descending = column == self.sort_column and not self.sort_descending
+            self.sort_column = column
+            self.refresh()
+        order = (
+            Qt.SortOrder.DescendingOrder if self.sort_descending else Qt.SortOrder.AscendingOrder
+        )
+        self.table.horizontalHeader().setSortIndicator(self.sort_column, order)
+
     def refresh(self):
         previous = self.table.currentRow()
         selected_id = (
@@ -983,6 +1000,16 @@ class VehiclesPage(QWidget):
         except ERRORS as error:
             QMessageBox.warning(self, "Не удалось открыть список", str(error))
             return
+        if self.sort_column == 1:
+            self.rows.sort(
+                key=lambda row: search_key(row["plate"] or ""), reverse=self.sort_descending
+            )
+            self.rows.sort(key=lambda row: not bool(search_key(row["plate"] or "")))
+        else:
+            self.rows.sort(
+                key=lambda row: ((row["make"] or "").casefold(), (row["model"] or "").casefold()),
+                reverse=self.sort_descending,
+            )
         self.table.setRowCount(len(self.rows))
         for index, vehicle in enumerate(self.rows):
             values = (

@@ -434,7 +434,7 @@ def reopen(root, report):
             dialog.kind.currentData() == "service_sheet", "Новый документ открывает сервисный лист"
         )
         check(dialog.pdf.pageCount() > 0, "Предпросмотр нового сервисного листа")
-        check("Квитанция" not in dialog.pdf.getAllText(0).text(), "Формат предпросмотра")
+        check("Заказ-наряд" not in dialog.pdf.getAllText(0).text(), "Формат предпросмотра")
         QTest.qWait(200)
         check(dialog.grab().save(str(root / "new-document-window.png")), "Снимок черновика")
         dialog.close()

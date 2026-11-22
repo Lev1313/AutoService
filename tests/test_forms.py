@@ -265,3 +265,43 @@ def test_current_repair_filter_combines_with_search(application, records):
     page.current_only.click()
     assert page.table.rowCount() == 2
     page.close()
+
+
+def test_vehicle_header_sorting_and_selection(application, records, monkeypatch):
+    from app.ui.vehicles import VehiclesPage
+
+    audi = records.save_vehicle({"make": "Audi", "plate": "Я900"})
+    ford = records.save_vehicle({"make": "Ford", "plate": "А100"})
+    empty = records.save_vehicle({"make": "BMW"})
+    page = VehiclesPage(records)
+    page.show()
+    application.processEvents()
+    header = page.table.horizontalHeader()
+
+    def click(column):
+        point = header.viewport().rect().center()
+        point.setX(header.sectionViewportPosition(column) + header.sectionSize(column) // 2)
+        QTest.mouseClick(header.viewport(), Qt.MouseButton.LeftButton, pos=point)
+
+    def ids():
+        return [row["id"] for row in page.rows]
+
+    assert ids() == [audi, empty, ford]
+    page.table.selectRow(2)
+    click(1)
+    assert ids() == [ford, audi, empty]
+    click(1)
+    assert ids() == [audi, ford, empty]
+    page.search.setText("Ford")
+    assert ids() == [ford]
+    page.search.clear()
+    assert ids() == [audi, ford, empty]
+    click(0)
+    assert ids() == [audi, empty, ford]
+    click(0)
+    assert ids() == [ford, empty, audi]
+    monkeypatch.setattr(
+        "app.ui.vehicles.open_vehicle_card", lambda records, vehicle_id, parent: vehicle_id
+    )
+    assert page.open_vehicle() == ford
+    page.close()

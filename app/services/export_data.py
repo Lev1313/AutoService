@@ -127,7 +127,7 @@ GUIDE = (
     "Результаты: no_answer — не дозвонились, postponed — перенос, reopen — вернуть в список.\n"
     "Записи: scheduled — запланирована, arrived — приехал, cancelled — отменена, "
     "no_show — не приехал.\n"
-    "Документы: simple — простая квитанция, detailed — подробная. "
+    "Документы: simple — простой заказ-наряд, detailed — подробный. "
     "Источники: manual/repair — вручную/ремонт, txt/import — TXT, maintenance — ТО.\n"
 )
 

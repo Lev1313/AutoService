@@ -1,4 +1,4 @@
-"""Неизменяемые снимки квитанций, отдельные черновики детализации и реквизиты."""
+"""Неизменяемые снимки заказ-нарядов, отдельные черновики детализации и реквизиты."""
 
 import json
 from datetime import datetime
@@ -140,7 +140,7 @@ class Documents:
         expected_notes=None,
     ):
         if kind not in ("simple", "detailed"):
-            raise ValueError("Выберите формат квитанции.")
+            raise ValueError("Выберите формат заказ-наряда.")
         if layout not in ("receipt", "service_sheet"):
             raise ValueError("Выберите шаблон документа.")
         normalized = normalize_items(items or []) if kind == "detailed" else []

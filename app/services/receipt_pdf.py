@@ -99,7 +99,7 @@ def build_pdf(document: dict) -> bytes:
                 )
             )
     flow.append(Spacer(1, 4 * mm))
-    flow.append(paragraph(f"Квитанция {document['number']}", heading))
+    flow.append(paragraph(f"Заказ-наряд {document['number']}", heading))
     flow.append(paragraph(f"Составлена: {human_date(document['created_at'][:10])}"))
     vehicle_name = " ".join(filter(None, (vehicle["make"], vehicle["model"]))) or "Автомобиль"
     details = [
@@ -210,7 +210,7 @@ def build_pdf(document: dict) -> bytes:
         rightMargin=18 * mm,
         topMargin=16 * mm,
         bottomMargin=20 * mm,
-        title=f"Квитанция {document['number']}",
+        title=f"Заказ-наряд {document['number']}",
         author=service["name"] or "AutoService",
     )
     template.build(flow, onFirstPage=first_page, onLaterPages=footer)

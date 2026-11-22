@@ -189,7 +189,7 @@ def test_pdf_cyrillic_optional_prices_and_atomic_export(application, data, tmp_p
     content = pdf_bytes(service.create(repair))
     pdf, buffer = load_pdf(content)
     text = pdf.getAllText(0).text()
-    assert "Квитанция" in text
+    assert "Заказ-наряд" in text
     assert "тест 123" in text
     assert "Итого" not in text and "1500,50" not in text
     assert "не разметка" in text
@@ -419,7 +419,7 @@ def test_issue_and_print_cancel_keeps_number(application, data, monkeypatch):
     dialog.print_button.click()
     assert not warnings
     assert opened == ["КВ-000001"]
-    assert "Квитанция КВ-000001 сохранена" in dialog.message.text()
+    assert "Заказ-наряд КВ-000001 сохранён" in dialog.message.text()
     assert dialog.export_button.isEnabled()
     dialog.print_button.click()
     assert opened == ["КВ-000001", "КВ-000001"]
