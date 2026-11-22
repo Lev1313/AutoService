@@ -95,7 +95,7 @@ def test_render_failure_rolls_back_document_and_number(data, monkeypatch):
     assert service.history(repair) == []
     assert service.draft(repair) == draft
     monkeypatch.setattr(renderer, "pdf_bytes", original)
-    assert service.create(repair, **draft, consume_draft=True)["number"] == "ЗН-000001"
+    assert service.create(repair, **draft, consume_draft=True)["number"] == "КВ-000001"
     assert service.draft(repair) is None
 
 
@@ -180,7 +180,7 @@ def test_preview_does_not_reserve_number_and_incomplete_draft_survives(data):
     draft = {"kind": "detailed", "description": "Черновик", "items": [{"title": "Не закончено"}]}
     service.save_draft(repair, draft)
     assert Documents(service.path).draft(repair) == draft
-    assert service.create(repair)["number"] == "ЗН-000001"
+    assert service.create(repair)["number"] == "КВ-000001"
     assert service.draft(repair) == draft
 
 
@@ -189,9 +189,9 @@ def test_pdf_cyrillic_optional_prices_and_atomic_export(application, data, tmp_p
     content = pdf_bytes(service.create(repair))
     pdf, buffer = load_pdf(content)
     text = pdf.getAllText(0).text()
-    assert "Заказ-наряд" in text
+    assert "Квитанция" in text
     assert "тест 123" in text
-    assert "Итого по заказ-наряду" in text and "1500,50" in text
+    assert "Итого" not in text and "1500,50" not in text
     assert "не разметка" in text
     assert "Получение оплаты" not in text
     pdf.close()
@@ -200,8 +200,7 @@ def test_pdf_cyrillic_optional_prices_and_atomic_export(application, data, tmp_p
     free, buffer = load_pdf(
         pdf_bytes(service.create(repair, "detailed", items, allow_difference=True))
     )
-    assert "Итого по работам" in free.getAllText(0).text()
-    assert "0,00 ₽" in free.getAllText(0).text()
+    assert "Итого: 0,00 ₽" in free.getAllText(0).text()
     free.close()
     buffer.close()
     target = tmp_path / "receipt.pdf"
@@ -303,7 +302,7 @@ def test_document_dialog_preview_save_history_and_stale_preview_guard(
     assert service.draft(repair) is None
     assert dialog.export_button.isEnabled()
     assert dialog.print_button.text() == "Печать"
-    assert dialog.document_status.text().startswith("Оформлен · ")
+    assert dialog.document_status.text().startswith("Оформлена · ")
     assert not dialog.create_button.isEnabled()
     dialog.reject()
     corrected = "Уточнённое описание ремонта"
@@ -419,11 +418,11 @@ def test_issue_and_print_cancel_keeps_number(application, data, monkeypatch):
     QTest.qWait(dialog.preview_timer.interval() + 100)
     dialog.print_button.click()
     assert not warnings
-    assert opened == ["ЗН-000001"]
-    assert "Документ ЗН-000001 сохранён" in dialog.message.text()
+    assert opened == ["КВ-000001"]
+    assert "Квитанция КВ-000001 сохранена" in dialog.message.text()
     assert dialog.export_button.isEnabled()
     dialog.print_button.click()
-    assert opened == ["ЗН-000001", "ЗН-000001"]
+    assert opened == ["КВ-000001", "КВ-000001"]
     assert len(service.history(repair)) == 1
     dialog.reject()
 
@@ -444,49 +443,3 @@ def test_print_without_available_printers(application, data, monkeypatch):
     assert "Сохранить PDF" in warnings[0]
     assert dialog.export_button.isEnabled()
     dialog.reject()
-
-
-def test_work_order_updates_open_repair_and_carries_only_current_recommendations(application, data):
-    from app.ui.vehicles import RepairDialog, open_repair_window
-
-    records, service, car, repair_id = data
-    previous = records.repairs(car)[0]
-    records.save_repair(
-        car, previous | {"recommendations": "Осмотреть фильтр\nПроверить ремень"}, repair_id
-    )
-    owner = RepairDialog(records, car)
-    editor = open_repair_window(records, car, owner)
-    editor.visit_date.setDate(editor.visit_date.date().fromString("2026-11-11", "yyyy-MM-dd"))
-    assert editor.recommendations.toPlainText() == "Осмотреть фильтр\nПроверить ремень"
-    editor.recommendations.setPlainText("Проверить ремень")
-    assert editor.save(close=False)
-    document = editor.open_documents()
-    document.kind.setCurrentIndex(document.kind.findData("receipt"))
-    document.description.setPlainText("Замена фильтра")
-    document.add_item("work", values={"title": "Замена", "quantity": "1", "price": "2000"})
-    document.add_item("part", values={"title": "Фильтр", "quantity": "1", "price": "3000"})
-    document.item_tables["part"].item(0, 2).setText("3500")
-    assert document.save(close=False)
-    assert editor.amount.text() == "5500,00"
-    assert editor.description.toPlainText() == "Замена фильтра"
-    assert "3500" in editor.positions.toPlainText()
-    assert document.create()
-    text = document.pdf.getAllText(0).text()
-    for caption, price in (
-        ("Итого по работам", "2000"),
-        ("Итого по запчастям", "3500"),
-        ("Итого по заказ-наряду", "5500"),
-    ):
-        assert f"{caption} {price},00" in text
-    assert records.repairs(car)[1]["recommendations"] == "Осмотреть фильтр\nПроверить ремень"
-    document.new_receipt()
-    assert len(document.state()["items"]) == 2
-    document.recommendations.clear()
-    assert document.save(close=False)
-    newer = RepairDialog(Records(records.path), car)
-    newer.visit_date.setDate(newer.visit_date.date().fromString("2026-11-12", "yyyy-MM-dd"))
-    assert newer.recommendations.toPlainText() == ""
-    newer.deleteLater()
-    document.reject()
-    editor.reject()
-    owner.reject()

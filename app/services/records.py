@@ -16,9 +16,7 @@ def identity_key(value: str) -> str:
 
 
 def check_repair_notes(row, expected):
-    if expected and any(
-        row[key] != expected[key] for key in ("description", "recommendations", "amount_kopecks")
-    ):
+    if expected and any(row[key] != expected[key] for key in ("description", "recommendations")):
         raise ValueError("Текст ремонта изменён в другом окне. Откройте запись заново.")
 
 

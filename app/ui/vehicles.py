@@ -1,6 +1,5 @@
 """Компактный список и простые формы автомобилей и ремонтов."""
 
-import json
 import sqlite3
 
 from PySide6.QtCore import QDate, QModelIndex, QStringListModel, Qt, Signal
@@ -384,12 +383,6 @@ class RepairDialog(SafeDialog):
         layout.addWidget(self.recommendations, 1)
         self.suggest_recommendations()
         self.visit_date.dateChanged.connect(self.suggest_recommendations)
-        self.positions = QPlainTextEdit()
-        self.positions.setReadOnly(True)
-        self.positions.setAccessibleName("Позиции заказ-наряда")
-        self.positions.setMaximumHeight(80)
-        layout.addWidget(self.positions)
-        self.show_positions(self.repair.get("document_items", "[]"))
         self.save_notice = plain_label("")
         self.save_notice.hide()
         layout.addWidget(self.save_notice)
@@ -417,18 +410,6 @@ class RepairDialog(SafeDialog):
         self.finish_button.setVisible(not self.repair.get("completed", False))
         layout.addLayout(row)
         self.prepare_guard()
-
-    def show_positions(self, raw_items):
-        lines = []
-        for item in json.loads(raw_items):
-            kind = "Запчасть" if item.get("kind") == "part" else "Работа"
-            price = item.get("price")
-            price_text = f" × {price} ₽" if price not in ("", None) else ""
-            lines.append(
-                f"{kind} · {item.get('title', '')} · {item.get('quantity', '')}{price_text}"
-            )
-        self.positions.setPlainText("\n".join(lines))
-        self.positions.setVisible(bool(lines))
 
     def suggest_recommendations(self):
         if not self.repair and not self.recommendations.document().isModified():
@@ -763,11 +744,6 @@ class VehicleCard(QDialog):
                 else ""
             )
             + (selected["description"] if selected else "")
-            + (
-                "\n\nРекомендации\n" + selected["recommendations"]
-                if selected and selected["recommendations"]
-                else ""
-            )
         )
 
     def open_source(self):
@@ -915,14 +891,12 @@ def open_repair_window(records, vehicle_id, owner, repair=None, *, appointment=N
                 for key in ("description", "recommendations"):
                     widget = getattr(document, key)
                     if (
-                        editor.repair[key] != document.expected[key]
+                        editor.repair[key] != document.expected_notes[key]
                         and widget.toPlainText() == document.original[key]
                     ):
                         widget.setPlainText(editor.repair[key])
                         document.original[key] = editor.repair[key]
-                        document.expected[key] = editor.repair[key]
-            if document and not document.current_document:
-                document.expected["amount_kopecks"] = editor.repair["amount_kopecks"]
+                        document.expected_notes[key] = editor.repair[key]
             workspace.repair_saved.emit(vehicle_id, repair_id)
 
         editor.repair_saved.connect(saved)
@@ -949,14 +923,9 @@ def open_document_window(records, repair_id, owner):
                         widget.setPlainText(repair[key])
                         editor.original[key] = repair[key]
                         editor.repair[key] = repair[key]
-                if editor.amount.text() == editor.original["amount"]:
-                    editor.amount.setText(amount_text(repair["amount_kopecks"]))
-                    editor.original["amount"] = editor.amount.text()
-                    editor.repair["amount_kopecks"] = repair["amount_kopecks"]
-                editor.show_positions(repair["document_items"])
             workspace.repair_saved.emit(repair["vehicle_id"], repair_id)
 
-        dialog.repair_updated.connect(refresh_repair)
+        dialog.notes_saved.connect(refresh_repair)
         return dialog
 
     return workspace.open((DocumentDialog, repair_id), create)

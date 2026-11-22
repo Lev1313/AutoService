@@ -129,7 +129,7 @@ def test_sheet_fields_no_prices_and_immutable_snapshot(application, tmp_path):
         == "Учебная рекомендация"
     )
     receipt = service.create(repair)
-    assert receipt["number"] == "ЗН-000002"
+    assert receipt["number"] == "КВ-000002"
 
 
 def test_both_pdf_formats_share_right_aligned_header(application, tmp_path):
@@ -252,12 +252,8 @@ def test_document_prices_are_optional_and_survive_draft_and_issue(application, t
     text = reopened.pdf.getAllText(0).text()
     assert text.index("Фильтр <тест>") < text.index("Замена фильтра")
     assert "100,01" in text and "200,02" in text
-    caption = (
-        "Итого по указанным ценам"
-        if layout == "service_sheet"
-        else "Итого по заказ-наряду (по указанным ценам)"
-    )
-    start = text.index(caption)
+    assert "Итого по указанным ценам" in text
+    start = text.index("Итого по указанным ценам")
     end = text.index("₽", start)
     assert (
         reopened.pdf.getSelectionAtIndex(0, start, end - start + 1).boundingRectangle().right()
