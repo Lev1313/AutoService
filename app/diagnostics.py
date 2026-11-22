@@ -299,14 +299,18 @@ def reopen(root, report):
         check(
             window.pages.currentWidget() is window.vehicles_page, "Стартовая страница автомобилей"
         )
-        check(window.navigation.item(1).text() == "Клиенты", "Раздел клиентов после автомобилей")
-        check(window.navigation.item(2).text() == "Звонки", "Раздел звонков после клиентов")
+        check(
+            window.navigation.item(1).text() == "Незавершённые ремонты",
+            "Незавершённые ремонты после автомобилей",
+        )
+        check(window.navigation.item(2).text() == "Клиенты", "Клиенты после ремонтов")
+        check(window.navigation.item(3).text() == "Звонки", "Раздел звонков после клиентов")
         check(window.grab().save(str(root / "startup-window.png")), "Снимок стартовой страницы")
         for index in range(window.navigation.count()):
             window.navigation.setCurrentRow(index)
             application.processEvents()
             check(window.pages.currentIndex() == index, "Переключение раздела")
-        check(window.navigation.item(3).text() == "Записи", "Записи перед настройками")
+        check(window.navigation.item(4).text() == "Записи", "Записи перед настройками")
         check(not window.windowIcon().pixmap(16, 16).isNull(), "Значок программы")
         window.navigation.setCurrentRow(window.pages.indexOf(window.appointments_page))
         window.appointments_page.day.setDate(QDate(2026, 12, 1))

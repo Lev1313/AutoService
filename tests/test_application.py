@@ -70,6 +70,9 @@ def test_window_and_navigation(application, tmp_path):
         assert window.pages.currentWidget() is window.vehicles_page
         QTest.keyClick(window.navigation, Qt.Key.Key_Down)
         assert window.pages.currentIndex() == 1
+        assert window.pages.currentWidget() is window.unfinished_repairs_page
+        assert window.navigation.currentItem().text() == "Незавершённые ремонты"
+        QTest.keyClick(window.navigation, Qt.Key.Key_Down)
         assert window.pages.currentWidget() is window.customers_page
         assert window.navigation.currentItem().text() == "Клиенты"
         window.focus_search()
@@ -88,5 +91,32 @@ def test_window_and_navigation(application, tmp_path):
         assert table.rowCount() == 1
         window.vehicles_page.search.setText("Несуществующий")
         assert table.rowCount() == 0
+    finally:
+        window.close()
+
+
+def test_unfinished_repairs_open_and_refresh_on_completion(application, tmp_path):
+    window = create_window(tmp_path / "test.sqlite3")
+    try:
+        window.show()
+        records = window.records
+        car = records.save_vehicle({"make": "Тест Авто", "plate": "ТЕСТ 123"})
+        first = records.save_repair(car, {"visit_date": "2026-11-20", "description": "Подвеска"})
+        second = records.save_repair(car, {"visit_date": "2026-11-22", "description": "Тормоза"})
+        page = window.unfinished_repairs_page
+        window.navigation.setCurrentRow(window.pages.indexOf(page))
+        assert [row["id"] for row in page.rows] == [second, first]
+        page.search.setText("тест123 подвеска")
+        assert [row["id"] for row in page.rows] == [first]
+        editor = page.open_repair()
+        assert not editor.save(completed=True)
+        assert editor.isVisible()
+        assert "Укажите пробег" in editor.mileage_note.text()
+        editor.mileage.setText("0")
+        assert editor.save(completed=True)
+        assert page.rows == []
+        page.search.clear()
+        assert [row["id"] for row in page.rows] == [second]
+        assert next(row for row in records.repairs(car) if row["id"] == first)["km"] == 0
     finally:
         window.close()

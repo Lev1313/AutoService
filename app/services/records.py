@@ -265,6 +265,23 @@ class Records:
                 )
             ]
 
+    def unfinished_repairs(self, query=""):
+        with connect(self.path) as connection:
+            rows = connection.execute(
+                """SELECT r.id, r.vehicle_id, r.visit_date, r.description,
+                          v.make, v.model, v.plate, v.vin
+                FROM repairs r JOIN vehicles v ON v.id = r.vehicle_id
+                WHERE r.deleted_at IS NULL AND r.state_known = 1 AND r.completed = 0
+                ORDER BY r.visit_date DESC, r.id DESC"""
+            ).fetchall()
+        words = [search_key(word) for word in query.split()]
+        fields = ("make", "model", "plate", "vin", "description")
+        return [
+            dict(row)
+            for row in rows
+            if all(any(word in search_key(row[field] or "") for field in fields) for word in words)
+        ]
+
     def latest_mileage(self, vehicle_id: int, on_date=None, exclude_repair=None):
         with connect(self.path) as connection:
             row = connection.execute(
@@ -318,6 +335,8 @@ class Records:
             except (ValueError, TypeError):
                 raise ValueError("Укажите корректную дату ремонта.") from None
         km = values.get("km")
+        if km is None and values.get("completed") and not (existing and existing["completed"]):
+            raise ValueError("Укажите пробег для завершения ремонта.")
         if km is not None and (type(km) is not int or not 0 <= km <= 100_000_000):
             raise ValueError("Пробег должен быть целым неотрицательным числом.")
         carried_km, carried_on = values.get("carried_km"), values.get("carried_on")

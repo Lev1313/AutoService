@@ -32,11 +32,11 @@ from app.ui.customers import CustomersPage
 from app.ui.help import HelpDialog
 from app.ui.maintenance import CallsPage
 from app.ui.theme import THEME_KEY, apply_theme
-from app.ui.vehicles import VehiclesPage, primary_button
+from app.ui.vehicles import UnfinishedRepairsPage, VehiclesPage, primary_button
 from app.ui.work_windows import work_windows
 from app.version import VERSION
 
-SECTIONS = ("Автомобили", "Клиенты", "Звонки", "Записи", "Настройки")
+SECTIONS = ("Автомобили", "Незавершённые ремонты", "Клиенты", "Звонки", "Записи", "Настройки")
 LAST_BACKUP_KEY = "last_manual_backup"
 
 
@@ -70,7 +70,7 @@ class NavigationDelegate(QStyledItemDelegate):
 class MainWindow(QMainWindow):
     def __init__(self, db_path: Path) -> None:
         super().__init__()
-        self.setWindowTitle("АвтоСервис — учёт автомобилей и ремонтов")
+        self.setWindowTitle("ФольцМастер — учёт автомобилей и ремонтов")
         self.resize(1100, 720)
         self.setMinimumSize(800, 540)
         self.workspace = work_windows(self)
@@ -87,7 +87,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(0)
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(210)
+        sidebar.setFixedWidth(236)
         side_layout = QVBoxLayout(sidebar)
         side_layout.setContentsMargins(18, 25, 18, 18)
         brand = QHBoxLayout()
@@ -95,7 +95,7 @@ class MainWindow(QMainWindow):
         logo = QLabel()
         logo.setPixmap(self.windowIcon().pixmap(32, 32))
         brand.addWidget(logo)
-        brand.addWidget(label("АвтоСервис", "brand"), 1)
+        brand.addWidget(label("ФольцМастер", "brand"), 1)
         side_layout.addLayout(brand)
         side_layout.addSpacing(24)
         self.navigation = QListWidget()
@@ -117,12 +117,14 @@ class MainWindow(QMainWindow):
         self.pages = QStackedWidget()
         self.records = Records(db_path)
         self.vehicles_page = VehiclesPage(self.records)
+        self.unfinished_repairs_page = UnfinishedRepairsPage(self.records)
         self.customers_page = CustomersPage(self.records)
         self.calls_page = CallsPage(self.records, "Звонки")
         self.appointments_page = AppointmentsPage(self.records)
         self.calls_page.appointment_requested.connect(self.schedule_from_call)
         for page in (
             self.vehicles_page,
+            self.unfinished_repairs_page,
             self.customers_page,
             self.calls_page,
             self.appointments_page,
@@ -258,6 +260,7 @@ class MainWindow(QMainWindow):
         page = self.pages.widget(index)
         if page in (
             self.vehicles_page,
+            self.unfinished_repairs_page,
             self.customers_page,
             self.calls_page,
             self.appointments_page,
@@ -270,7 +273,7 @@ class MainWindow(QMainWindow):
 
     def focus_search(self):
         page = self.pages.currentWidget()
-        if page not in (self.vehicles_page, self.customers_page):
+        if page not in (self.vehicles_page, self.unfinished_repairs_page, self.customers_page):
             page = self.vehicles_page
             self.navigation.setCurrentRow(self.pages.indexOf(page))
         page.search.setFocus()

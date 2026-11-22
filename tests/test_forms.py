@@ -250,7 +250,7 @@ def test_current_repair_filter_combines_with_search(application, records):
     deleted = records.save_vehicle({"make": "Honda", "plate": "ТЕСТ 003"})
     records.save_vehicle({"make": "Honda", "plate": "ТЕСТ 004"})
     records.save_repair(current, {"visit_date": "2026-11-20"})
-    records.save_repair(complete, {"visit_date": "2026-11-20", "completed": True})
+    records.save_repair(complete, {"visit_date": "2026-11-20", "completed": True, "km": 0})
     discarded = records.save_repair(deleted, {"visit_date": "2026-11-20"})
     records.set_repair_deleted(deleted, discarded)
     page = VehiclesPage(records)

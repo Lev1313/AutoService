@@ -2,8 +2,8 @@ import sqlite3
 from contextlib import closing
 
 import pytest
-from PySide6.QtCore import QDate
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtCore import QDate, QTimer
+from PySide6.QtWidgets import QApplication, QMessageBox
 from test_txt_import import entries
 
 from app.database.connection import (
@@ -62,19 +62,35 @@ def test_ui_carries_only_before_date_and_can_confirm_same_value(application, dat
     records, car, first = data
     dialog = RepairDialog(records, car)
     dialog.visit_date.setDate(QDate(2026, 2, 1))
-    assert dialog.mileage.text() == "1000 ?"
+    assert dialog.mileage.text() == ""
+    assert "1\u202f000 км" in dialog.mileage_note.text()
     dialog.visit_date.setDate(QDate(2025, 12, 31))
     assert dialog.mileage.text() == ""
+    assert not dialog.mileage_note.text()
     dialog.visit_date.setDate(QDate(2026, 2, 1))
     dialog.description.setPlainText("Без нового замера")
     assert dialog.save()
     repair = records.repairs(car)[0]
     assert repair["km"] is None and repair["carried_km"] == 1000
     reopen = RepairDialog(records, car, repair)
-    assert reopen.mileage.text() == "1000 ?"
-    reopen.measured.setChecked(True)
+    assert reopen.mileage.text() == ""
+    reopen.show()
+    reopen.amount.setText("500")
+    QTimer.singleShot(0, lambda: QApplication.activeModalWidget().reject())
+    assert not reopen.save(completed=True)
+    assert reopen.isVisible()
+    assert reopen.description.toPlainText() == "Без нового замера"
+    assert reopen.amount.text() == "500"
+    assert not records.repairs(car)[0]["completed"]
+
+    def confirm_same():
+        prompt = QApplication.activeModalWidget()
+        next(button for button in prompt.buttons() if button.text().startswith("Те же")).click()
+
+    QTimer.singleShot(0, confirm_same)
+    assert reopen.save(completed=True)
     assert reopen.mileage.text() == "1000"
-    assert reopen.save()
+    assert records.repairs(car)[0]["completed"]
     assert records.latest_mileage(car)["recorded_on"] == "2026-02-01"
     assert records.repairs(car)[0]["carried_km"] is None
     dialog.deleteLater()
