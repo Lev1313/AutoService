@@ -7,7 +7,7 @@
 
 22 ноября 2026 года механику передали **AutoService 0.5.21**. Исходники этой версии находятся в ветке `main`.
 
-Последний опубликованный выпуск на GitHub — **0.5.17**. [Скачать ZIP для Windows x64, руководство PDF и контрольные суммы версии 0.5.17][release].
+Последний опубликованный выпуск на GitHub — **0.5.21**. [Скачать ZIP для Windows x64, руководство PDF и контрольные суммы версии 0.5.21][release].
 
 1. Распакуйте весь ZIP в отдельную папку. Для работы нужен Windows x64, Python устанавливать не требуется.
 2. Запустите `AutoService.exe`. При первом запуске на компьютере программа создаст рабочую базу.
@@ -65,4 +65,4 @@ py -3.13 -m venv .venv
 - [Архитектура](docs/architecture.md) и [требования](docs/requirements.md)
 - [Настройка окружения](docs/environment.md), [синхронизация GitHub](docs/GITHUB.md) и [сборка Windows](docs/WINDOWS-RELEASE.md)
 
-[release]: https://github.com/Lev1313/AutoService/releases/tag/v0.5.17
+[release]: https://github.com/Lev1313/AutoService/releases/tag/v0.5.21
