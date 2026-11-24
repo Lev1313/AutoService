@@ -119,6 +119,22 @@ def test_draft_completion_edit_and_mileage_consistency(records):
     assert records.latest_mileage(car) is None
 
 
+def test_editing_earlier_repair_preserves_same_day_reading_order(records):
+    car = records.save_vehicle({"plate": "ТЕСТ"})
+    values = {"visit_date": "2026-11-24", "km": 10000}
+    first = records.save_repair(car, values)
+    earlier = records.latest_mileage(car)
+    records.save_repair(car, values | {"km": 10100})
+    latest = records.latest_mileage(car)
+
+    records.save_repair(car, values | {"description": "Уточнены работы"}, first)
+    initialize_database(records.path)
+    reopened = Records(records.path)
+    assert reopened.latest_mileage(car) == latest
+    assert reopened.latest_mileage(car, exclude_repair=latest["repair_id"]) == earlier
+    assert reopened.repairs(car)[1]["description"] == "Уточнены работы"
+
+
 def test_invalid_repair_is_atomic_and_cannot_move_between_cars(records):
     first = records.save_vehicle({"plate": "ТЕСТ1"})
     second = records.save_vehicle({"plate": "ТЕСТ2"})

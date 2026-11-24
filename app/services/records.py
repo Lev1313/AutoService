@@ -481,11 +481,14 @@ class Records:
                 "UPDATE repairs SET carried_km=?,carried_on=? WHERE id=?",
                 (carried_km, carried_on, repair_id),
             )
-            connection.execute("DELETE FROM odometer_readings WHERE repair_id=?", (repair_id,))
-            if km is not None and visit_date is not None:
+            if km is None or visit_date is None:
+                connection.execute("DELETE FROM odometer_readings WHERE repair_id=?", (repair_id,))
+            else:
                 connection.execute(
                     """INSERT INTO odometer_readings(vehicle_id, repair_id, recorded_on, km,
-                    verified,source) VALUES (?, ?, ?, ?, ?, ?)""",
+                    verified,source) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(repair_id) DO UPDATE SET recorded_on=excluded.recorded_on,
+                    km=excluded.km, verified=excluded.verified""",
                     (
                         vehicle_id,
                         repair_id,
