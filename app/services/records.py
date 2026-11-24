@@ -7,6 +7,30 @@ from pathlib import Path
 from app.database.connection import connect
 
 
+def mileage_matches_history(connection, vehicle_id, visit_date, km, repair_id=None):
+    conflict = connection.execute(
+        """WITH history(day, reading) AS (
+            SELECT o.recorded_on, o.km FROM odometer_readings o
+            LEFT JOIN repairs r ON r.id=o.repair_id
+            WHERE o.vehicle_id=? AND o.verified=1 AND r.deleted_at IS NULL
+              AND o.repair_id IS NOT ?
+            UNION ALL
+            SELECT baseline_date, baseline_km FROM maintenance_plans WHERE vehicle_id=?
+        ) SELECT 1 FROM history WHERE (day < ? AND reading > ?) OR (day > ? AND reading < ?)
+          LIMIT 1""",
+        (
+            vehicle_id,
+            repair_id if repair_id is not None else -1,
+            vehicle_id,
+            visit_date,
+            km,
+            visit_date,
+            km,
+        ),
+    ).fetchone()
+    return conflict is None
+
+
 def search_key(value: str) -> str:
     return "".join(character for character in value.casefold() if character.isalnum())
 
@@ -331,18 +355,7 @@ class Records:
 
     def mileage_consistent(self, vehicle_id: int, visit_date: str, km: int, repair_id=None):
         with connect(self.path) as connection:
-            rows = connection.execute(
-                """SELECT o.recorded_on, o.km FROM odometer_readings o
-                LEFT JOIN repairs r ON r.id=o.repair_id
-                WHERE o.vehicle_id=? AND o.verified=1 AND r.deleted_at IS NULL
-                AND (o.repair_id IS NULL OR o.repair_id != ?)""",
-                (vehicle_id, repair_id if repair_id is not None else -1),
-            ).fetchall()
-        return all(
-            (row["recorded_on"] >= visit_date or row["km"] <= km)
-            and (row["recorded_on"] <= visit_date or row["km"] >= km)
-            for row in rows
-        )
+            return mileage_matches_history(connection, vehicle_id, visit_date, km, repair_id)
 
     def previous_recommendations(self, vehicle_id, visit_date):
         with connect(self.path) as connection:
@@ -408,10 +421,9 @@ class Records:
         amount = values.get("amount_kopecks")
         if amount is not None and (type(amount) is not int or not 0 <= amount <= 99_999_999_999):
             raise ValueError("Стоимость должна быть целым неотрицательным числом копеек.")
-        requested_verified = (
-            bool(values.get("mileage_verified", existing.get("verified", False)))
-            if existing and existing["origin"] == "txt"
-            else True
+        keep_status = existing and (existing["origin"] == "txt" or existing["km"] == km)
+        requested_verified = bool(
+            values.get("mileage_verified", existing["verified"] if keep_status else True)
         )
         if (
             existing
@@ -420,20 +432,20 @@ class Records:
             and (km is None or visit_date is None)
         ):
             raise ValueError("Для достоверного замера нужны дата и пробег.")
-        consistent = (
-            km is None
-            or visit_date is None
-            or self.mileage_consistent(vehicle_id, visit_date, km, repair_id)
-        )
-        verified = requested_verified and consistent and visit_date is not None
-        if not consistent and requested_verified and not allow_unverified:
-            raise ValueError("Пробег противоречит истории. Проверьте его перед сохранением.")
         state_known = int(
             bool(values.get("state_known", existing["state_known"] if existing else True))
             or bool(values.get("completed"))
         )
         with connect(self.path) as connection:
             connection.execute("BEGIN IMMEDIATE")
+            consistent = (
+                km is None
+                or visit_date is None
+                or mileage_matches_history(connection, vehicle_id, visit_date, km, repair_id)
+            )
+            verified = requested_verified and consistent and visit_date is not None
+            if not consistent and requested_verified and not allow_unverified:
+                raise ValueError("Пробег противоречит истории. Проверьте его перед сохранением.")
             if repair_id is not None:
                 current = connection.execute(
                     "SELECT * FROM repairs WHERE id=? AND vehicle_id=? AND deleted_at IS NULL",

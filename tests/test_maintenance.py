@@ -172,6 +172,41 @@ def test_repair_text_never_resets_cycle_and_completion_is_explicit(data):
     assert len(service.tasks()) == 1
 
 
+def test_completion_checks_plan_start_mileage(data):
+    _, service, car = data
+    plan = service.save_plan(car, plan_values(baseline_km=80000))
+    with pytest.raises(ValueError, match="пробег|Пробег"):
+        service.record_completion(plan, "2026-10-01", 75000)
+    assert service.plans()[0]["cycle_no"] == 1
+
+
+@pytest.mark.parametrize("confirm_km", [False, True])
+def test_completion_requires_separate_confirmation_for_unverified_km(application, data, confirm_km):
+    records, service, car = data
+    repair = records.save_repair(car, {"visit_date": "2026-10-01", "km": 50000, "completed": True})
+    with connect(records.path) as connection:
+        connection.execute("UPDATE repairs SET origin='txt' WHERE id=?", (repair,))
+        connection.execute(
+            "UPDATE odometer_readings SET verified=0,source='import' WHERE repair_id=?", (repair,)
+        )
+    plan = service.save_plan(car, plan_values())
+    dialog = CompletionDialog(service, service.plans()[0])
+    dialog.repairs.setCurrentIndex(dialog.repairs.findData(repair))
+    assert dialog.km.text() == ""
+    with pytest.raises(ValueError, match="свер"):
+        service.record_completion(plan, "2026-10-01", 50000, repair)
+    dialog.confirm.setChecked(True)
+    if confirm_km:
+        dialog.verify_reading.click()
+    dialog.save()
+    assert service.plans()[0]["baseline_km"] == (50000 if confirm_km else None)
+    assert records.repairs(car)[0]["verified"] == 0
+    if confirm_km:
+        assert records.latest_mileage(car)["source"] == "maintenance"
+    else:
+        assert records.latest_mileage(car) is None
+
+
 def test_refusal_disables_all_vehicle_invites_until_explicitly_reopened(data):
     _, service, car = data
     service.save_plan(car, plan_values())

@@ -5,7 +5,7 @@ import math
 from datetime import date, datetime, timedelta
 
 from app.database.connection import connect
-from app.services.records import Records
+from app.services.records import Records, mileage_matches_history
 
 
 def optional_integer(text: str, title: str, maximum: int = 100_000_000):
@@ -197,7 +197,16 @@ class Maintenance:
         self.sync_tasks()
         return plan_id
 
-    def record_completion(self, plan_id: int, performed_on: str, km=None, repair_id=None, note=""):
+    def record_completion(
+        self,
+        plan_id: int,
+        performed_on: str,
+        km=None,
+        repair_id=None,
+        note="",
+        *,
+        confirmed_repair_km=None,
+    ):
         try:
             if date.fromisoformat(performed_on) > date.today():
                 raise ValueError
@@ -206,6 +215,7 @@ class Maintenance:
         if km is not None and (type(km) is not int or not 0 <= km <= 100_000_000):
             raise ValueError("Проверьте пробег.")
         with connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
             plan = connection.execute(
                 "SELECT * FROM maintenance_plans WHERE id=?", (plan_id,)
             ).fetchone()
@@ -213,20 +223,34 @@ class Maintenance:
                 raise ValueError("Правило ТО не найдено.")
             if plan["baseline_date"] and performed_on < plan["baseline_date"]:
                 raise ValueError("Новая отметка ТО не может предшествовать началу текущего цикла.")
-            if km is not None and not Records(self.path).mileage_consistent(
-                plan["vehicle_id"],
-                performed_on,
-                km,
+            if km is not None and plan["baseline_km"] is not None and km < plan["baseline_km"]:
+                raise ValueError(
+                    f"Пробег ниже исходного для этого ТО ({plan['baseline_km']} км). "
+                    "Проверьте показание или оставьте поле пустым."
+                )
+            if km is not None and not mileage_matches_history(
+                connection, plan["vehicle_id"], performed_on, km
             ):
                 raise ValueError("Пробег противоречит истории. Проверьте или оставьте поле пустым.")
             if repair_id is not None:
                 repair = connection.execute(
-                    "SELECT * FROM repairs WHERE id=? AND vehicle_id=? "
-                    "AND completed=1 AND deleted_at IS NULL",
+                    """SELECT COALESCE(o.km,r.undated_km) AS km, o.verified FROM repairs r
+                    LEFT JOIN odometer_readings o ON o.repair_id=r.id
+                    WHERE r.id=? AND r.vehicle_id=? AND r.completed=1 AND r.deleted_at IS NULL""",
                     (repair_id, plan["vehicle_id"]),
                 ).fetchone()
                 if repair is None:
                     raise ValueError("Выберите завершённый ремонт этого автомобиля.")
+                if (
+                    km is not None
+                    and km == repair["km"]
+                    and not repair["verified"]
+                    and confirmed_repair_km != km
+                ):
+                    raise ValueError(
+                        "Пробег ремонта требует отдельной сверки. "
+                        "Подтвердите показание или оставьте поле пустым."
+                    )
                 if connection.execute(
                     "SELECT id FROM maintenance_events WHERE plan_id=? AND repair_id=?",
                     (plan_id, repair_id),

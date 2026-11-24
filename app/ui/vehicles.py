@@ -401,7 +401,8 @@ class RepairDialog(SafeDialog):
         self.suggest_mileage()
         self.mileage_verified = QCheckBox("Пробег проверен")
         self.mileage_verified.setChecked(bool(self.repair.get("verified")))
-        self.mileage_verified.setVisible(self.repair.get("origin") == "txt")
+        self.review_mileage = self.repair.get("origin") == "txt" or self.repair.get("verified") == 0
+        self.mileage_verified.setVisible(self.review_mileage)
         form.addRow(self.mileage_verified)
         self.amount = QLineEdit(amount_text(self.repair.get("amount_kopecks")))
         self.amount.setMaxLength(30)
@@ -522,7 +523,7 @@ class RepairDialog(SafeDialog):
             "description": self.description.toPlainText(),
             "recommendations": self.recommendations.toPlainText(),
         }
-        if self.repair.get("origin") == "txt":
+        if self.review_mileage:
             values["mileage_verified"] = self.mileage_verified.isChecked()
         return values
 

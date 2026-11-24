@@ -5,7 +5,7 @@ from datetime import date, datetime
 from hashlib import sha256
 
 from app.database.connection import backup_database, connect
-from app.services.records import identity_key
+from app.services.records import identity_key, mileage_matches_history
 from app.services.txt_parser import decode_text, read_source
 
 
@@ -187,22 +187,11 @@ class TxtImport:
                     )
                 visit_date, km = values.get("visit_date"), values.get("km")
                 verified = bool(values.get("mileage_verified"))
-                if verified:
-                    rows = connection.execute(
-                        "SELECT recorded_on,km FROM odometer_readings o "
-                        "LEFT JOIN repairs r ON r.id=o.repair_id "
-                        "WHERE o.vehicle_id=? AND o.verified=1 AND r.deleted_at IS NULL",
-                        (vehicle_id,),
-                    ).fetchall()
-                    if not all(
-                        (row["recorded_on"] >= visit_date or row["km"] <= km)
-                        and (row["recorded_on"] <= visit_date or row["km"] >= km)
-                        for row in rows
-                    ):
-                        raise ValueError(
-                            "Подтверждённый пробег противоречит истории. "
-                            "Проверьте или снимите отметку достоверности."
-                        )
+                if verified and not mileage_matches_history(connection, vehicle_id, visit_date, km):
+                    raise ValueError(
+                        "Подтверждённый пробег противоречит истории. "
+                        "Проверьте или снимите отметку достоверности."
+                    )
                 repair_id = connection.execute(
                     """INSERT INTO repairs(vehicle_id,visit_date,description,amount_kopecks,
                     completed,origin,state_known,undated_km) VALUES (?,?,?,?,?,'txt',?,?)""",

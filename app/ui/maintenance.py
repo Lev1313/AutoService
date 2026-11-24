@@ -142,6 +142,15 @@ class CompletionDialog(SafeDialog):
         self.km.setMaxLength(12)
         self.km.setPlaceholderText("Необязательно")
         form.addRow("Пробег, км", self.km)
+        self.reading_note = plain_label("")
+        form.addRow(self.reading_note)
+        self.verify_reading = QPushButton("Пробег сверен — использовать для ТО")
+        form.addRow(self.verify_reading)
+        self.reading_note.hide()
+        self.verify_reading.hide()
+        self.verify_reading.clicked.connect(self.use_checked_reading)
+        self.confirmed_repair_km = None
+        self.km.textChanged.connect(self.reset_confirmation)
         self.note = QPlainTextEdit()
         self.note.setMaximumHeight(90)
         form.addRow("Примечание", self.note)
@@ -165,11 +174,29 @@ class CompletionDialog(SafeDialog):
             (row for row in self.repair_rows if row["id"] == self.repairs.currentData()),
             None,
         )
+        self.selected_reading = selected
+        self.confirmed_repair_km = None
+        self.km.clear()
+        has_reading = selected is not None and selected["km"] is not None
+        self.reading_note.setVisible(has_reading)
+        self.verify_reading.setVisible(bool(has_reading and not selected["verified"]))
         if selected:
             if selected["visit_date"]:
                 self.performed_on.setDate(QDate.fromString(selected["visit_date"], "yyyy-MM-dd"))
-            self.km.setText(str(selected["km"]) if selected["km"] is not None else "")
+            if has_reading:
+                status = "подтверждён" if selected["verified"] else "требует сверки"
+                self.reading_note.setText(f"Пробег в ремонте — {selected['km']} км ({status}).")
+                if selected["verified"]:
+                    self.km.setText(str(selected["km"]))
         self.confirm.setChecked(False)
+
+    def reset_confirmation(self):
+        self.confirmed_repair_km = None
+
+    def use_checked_reading(self):
+        km = self.selected_reading["km"]
+        self.km.setText(str(km))
+        self.confirmed_repair_km = km
 
     def state(self):
         return {
@@ -191,6 +218,7 @@ class CompletionDialog(SafeDialog):
                 optional_integer(values["km"], "Пробег"),
                 values["repair_id"],
                 values["note"],
+                confirmed_repair_km=self.confirmed_repair_km,
             )
         except ERRORS as error:
             QMessageBox.warning(self, "Не удалось отметить ТО", str(error))
