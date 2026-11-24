@@ -22,8 +22,9 @@ from app.database.connection import (
 from app.services.documents import Documents, TotalMismatch, normalize_items
 from app.services.maintenance import Maintenance
 from app.services.receipt_pdf import pdf_bytes, save_pdf
-from app.services.records import Records, amount_text
+from app.services.records import Records, RepairFieldConflict, amount_text
 from app.ui.documents import DocumentDialog
+from app.ui.vehicles import RepairDialog
 
 
 @pytest.fixture
@@ -50,6 +51,75 @@ def data(tmp_path):
         },
     )
     return records, Documents(path), car, repair
+
+
+@pytest.mark.parametrize("repair_first", [False, True])
+@pytest.mark.parametrize("choice", ["Мой вариант", "Сохранённый вариант", "Отмена"])
+def test_two_windows_resolve_conflict(application, data, monkeypatch, repair_first, choice):
+    records, service, car, repair = data
+    editor = RepairDialog(records, car, records.repairs(car)[0])
+    doc = DocumentDialog(records, repair)
+    editor.description.setPlainText("Из карточки")
+    editor.amount.setText("2500")
+    doc.description.setPlainText("Из документа")
+    doc.recommendations.setPlainText("Проверить колодки")
+    first, second = (editor, doc) if repair_first else (doc, editor)
+    assert first.save(close=False)
+    prompts = []
+
+    def choose(prompt):
+        prompts.append(prompt.text())
+        next(button for button in prompt.buttons() if button.text() == choice).click()
+
+    monkeypatch.setattr(QMessageBox, "exec", choose)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: pytest.fail(str(args[2])))
+    assert second.save(close=False) == (choice != "Отмена")
+    assert len(prompts) == 1 and all(t in prompts[0] for t in ("Из карточки", "Из документа"))
+    stored = records.repairs(car)[0]
+    if choice == "Отмена":
+        assert second.description.toPlainText() != stored["description"]
+        assert stored["amount_kopecks"] == (250000 if repair_first else 150050)
+    else:
+        use_editor = repair_first == (choice == "Сохранённый вариант")
+        assert stored["description"] == ("Из карточки" if use_editor else "Из документа")
+        assert stored["recommendations"] == "Проверить колодки"
+        assert stored["amount_kopecks"] == 250000
+        assert second.description.toPlainText() == stored["description"]
+        assert second.save(close=False)
+        assert service.draft(repair)["description"] == stored["description"]
+    for dialog in (editor, doc):
+        dialog.deleteLater()
+
+
+def test_issue_merges_independent_fields_and_current_amount(application, data):
+    records, _, car, repair = data
+    doc = DocumentDialog(records, repair)
+    doc.recommendations.setPlainText("Повторный осмотр")
+    current = records.repairs(car)[0]
+    records.save_repair(car, current | {"description": "Новые работы", "amount_kopecks": 0}, repair)
+    assert doc.create()
+    payload = doc.current_document["payload"]
+    assert payload["description"] == "Новые работы"
+    assert payload["recommendations"] == "Повторный осмотр"
+    assert payload["total_kopecks"] == 0
+    assert records.repairs(car)[0]["recommendations"] == "Повторный осмотр"
+    doc.deleteLater()
+
+
+def test_rechecks_changed_amount_before_retry(data):
+    records, _, car, repair = data
+    original = records.repairs(car)[0]
+    proposed = original | {"amount_kopecks": 0, "recommendations": "Осмотр"}
+    records.save_repair(car, original | {"amount_kopecks": None}, repair)
+    with pytest.raises(RepairFieldConflict) as first:
+        records.save_repair(car, proposed, repair, expected_notes=original)
+    assert first.value.field == "amount_kopecks" and first.value.stored is None
+    reviewed = original | {"amount_kopecks": None}
+    records.save_repair(car, reviewed | {"amount_kopecks": 120000}, repair)
+    with pytest.raises(RepairFieldConflict) as second:
+        records.save_repair(car, proposed, repair, expected_notes=reviewed)
+    assert second.value.stored == 120000 and second.value.proposed == 0
+    assert records.repairs(car)[0]["recommendations"] == original["recommendations"]
 
 
 def load_pdf(content, parent=None):

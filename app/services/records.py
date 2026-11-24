@@ -15,9 +15,38 @@ def identity_key(value: str) -> str:
     return search_key(value).translate(str.maketrans("авекмнорстух", "abekmhopctyx"))
 
 
-def check_repair_notes(row, expected):
-    if expected and any(row[key] != expected[key] for key in ("description", "recommendations")):
-        raise ValueError("Текст ремонта изменён в другом окне. Откройте запись заново.")
+class RepairFieldConflict(ValueError):
+    def __init__(self, field, stored, proposed):
+        super().__init__("Поле ремонта изменено в двух окнах.")
+        self.field = field
+        self.stored = stored
+        self.proposed = proposed
+
+
+def merge_repair_fields(connection, row, proposed, expected, *, save=True):
+    """Сверить каждое общее поле с исходным значением внутри транзакции записи."""
+    merged = {}
+    for key in ("description", "recommendations", "amount_kopecks"):
+        stored = row[key]
+        value = proposed.get(key, stored)
+        if expected and key in expected and stored != expected[key]:
+            if value == expected[key]:
+                value = stored
+            elif value != stored:
+                raise RepairFieldConflict(key, stored, value)
+        merged[key] = value
+    if save:
+        connection.execute(
+            "UPDATE repairs SET description=?, recommendations=?, amount_kopecks=? WHERE id=?",
+            (merged["description"], merged["recommendations"], merged["amount_kopecks"], row["id"]),
+        )
+        for key in ("description", "recommendations"):
+            if merged[key] != row[key]:
+                connection.execute(
+                    "UPDATE document_drafts SET payload=json_set(payload, ?, ?) WHERE repair_id=?",
+                    ("$." + key, merged[key], row["id"]),
+                )
+    return merged
 
 
 def parse_amount(value: str) -> int | None:
@@ -412,7 +441,7 @@ class Records:
                 ).fetchone()
                 if current is None:
                     raise ValueError("Ремонт не найден или удалён.")
-                check_repair_notes(current, expected_notes)
+                merge_repair_fields(connection, current, values, expected_notes)
             exists = connection.execute(
                 "SELECT id FROM vehicles WHERE id=?", (vehicle_id,)
             ).fetchone()
@@ -435,10 +464,11 @@ class Records:
                 ).lastrowid
             else:
                 cursor = connection.execute(
-                    """UPDATE repairs SET visit_date=?, description=?, amount_kopecks=?,
+                    """UPDATE repairs SET visit_date=?,
                     completed=?, undated_km=?, state_known=? WHERE id=? AND vehicle_id=?""",
                     (
-                        *parameters,
+                        visit_date,
+                        int(bool(values.get("completed", False))),
                         km if visit_date is None else None,
                         state_known,
                         repair_id,
@@ -447,17 +477,6 @@ class Records:
                 )
                 if cursor.rowcount != 1:
                     raise ValueError("Ремонт не найден у этого автомобиля.")
-                notes = values.get("recommendations", current["recommendations"])
-                connection.execute(
-                    "UPDATE repairs SET recommendations=? WHERE id=?", (notes, repair_id)
-                )
-                for key in ("description", "recommendations"):
-                    if key in values and values[key] != current[key]:
-                        connection.execute(
-                            "UPDATE document_drafts SET payload=json_set(payload, ?, ?) "
-                            "WHERE repair_id=?",
-                            ("$." + key, values[key], repair_id),
-                        )
             connection.execute(
                 "UPDATE repairs SET carried_km=?,carried_on=? WHERE id=?",
                 (carried_km, carried_on, repair_id),

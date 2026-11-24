@@ -387,7 +387,7 @@ class DocumentDialog(SafeDialog):
                 "recommendations": repair["recommendations"],
                 "items": json.loads(repair["document_items"]),
             }
-            values = with_repair
+            values = {"recommendations": repair["recommendations"]} | with_repair
         selected_layout = values.get("layout", "receipt")
         self.kind.setCurrentIndex(max(0, self.kind.findData(selected_layout)))
         self.description.setPlainText(values["description"])
@@ -547,11 +547,11 @@ class DocumentDialog(SafeDialog):
         if self.current_document or self.deleted_repair:
             return False
         self.commit_item_editor()
-        value = self.state()
-        try:
+
+        def issue(value, expected):
             try:
                 result = self.service.create(
-                    self.repair_id, **value, consume_draft=True, expected_notes=self.expected_notes
+                    self.repair_id, **value, consume_draft=True, expected_notes=expected
                 )
             except TotalMismatch as error:
                 if (
@@ -570,8 +570,14 @@ class DocumentDialog(SafeDialog):
                     **value,
                     allow_difference=True,
                     consume_draft=True,
-                    expected_notes=self.expected_notes,
+                    expected_notes=expected,
                 )
+            return result
+
+        try:
+            result = self.save_shared_fields(self.state(), self.expected_notes, issue)
+            if not result:
+                return False
         except (*ERRORS, RuntimeError) as error:
             QMessageBox.warning(self, "Не удалось оформить документ", str(error))
             return False
@@ -595,10 +601,18 @@ class DocumentDialog(SafeDialog):
         self.commit_item_editor()
         try:
             if not self.current_document:
-                self.service.save_draft(
-                    self.repair_id, self.state(), expected_notes=self.expected_notes
+                merged = self.save_shared_fields(
+                    self.state(),
+                    self.expected_notes,
+                    lambda proposed, expected: self.service.save_draft(
+                        self.repair_id, proposed, expected_notes=expected
+                    ),
                 )
-                self.expected_notes = self.source_repair()
+                if merged is None:
+                    return False
+                self.expected_notes = merged
+                self.description.setPlainText(merged["description"])
+                self.recommendations.setPlainText(merged["recommendations"])
                 self.notes_saved.emit()
             self.original = self.state()
         except ERRORS as error:

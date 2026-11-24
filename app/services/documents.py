@@ -7,7 +7,7 @@ from hashlib import sha256
 from uuid import uuid4
 
 from app.database.connection import connect
-from app.services.records import check_repair_notes, parse_amount
+from app.services.records import merge_repair_fields, parse_amount
 
 SETTINGS = ("name", "address", "phone", "requisites")
 
@@ -113,17 +113,19 @@ class Documents:
             row = connection.execute("SELECT * FROM repairs WHERE id=?", (repair_id,)).fetchone()
             if row is None or row["deleted_at"]:
                 raise ValueError("Ремонт не найден или удалён. Сначала восстановите его.")
-            check_repair_notes(row, expected_notes)
-            connection.execute(
-                "UPDATE repairs SET description=COALESCE(?,description), "
-                "recommendations=COALESCE(?,recommendations) WHERE id=?",
-                (values.get("description"), values.get("recommendations"), repair_id),
-            )
+            notes = {
+                k: values[k]
+                for k in ("description", "recommendations")
+                if values.get(k) is not None
+            }
+            merged = merge_repair_fields(connection, row, notes, expected_notes)
+            values = values | {k: merged[k] for k in notes}
             connection.execute(
                 "INSERT INTO document_drafts(repair_id,payload) VALUES (?,?) "
                 "ON CONFLICT(repair_id) DO UPDATE SET payload=excluded.payload",
                 (repair_id, json.dumps(values, ensure_ascii=False)),
             )
+        return merged
 
     def create(
         self,
@@ -158,7 +160,14 @@ class Documents:
                 )
             if repair is None:
                 raise ValueError("Сначала сохраните ремонт.")
-            check_repair_notes(repair, expected_notes)
+            notes = {"description": description, "recommendations": recommendations}
+            merged = merge_repair_fields(
+                connection,
+                repair,
+                {k: v for k, v in notes.items() if v is not None},
+                expected_notes,
+                save=consume_draft and not preview,
+            )
             vehicle = connection.execute(
                 """SELECT v.*, c.name AS contact_name, c.phone FROM vehicles v
                 LEFT JOIN contacts c ON c.id=v.contact_id WHERE v.id=?""",
@@ -180,13 +189,11 @@ class Documents:
             payload = {
                 "schema": 1,
                 "layout": layout,
-                "recommendations": repair["recommendations"]
-                if recommendations is None
-                else str(recommendations),
-                "repair": dict(repair),
+                "recommendations": merged["recommendations"],
+                "repair": dict(repair) | merged,
                 "vehicle": dict(vehicle),
                 "service": {key: stored_settings.get(key, "") for key in SETTINGS},
-                "description": repair["description"] if description is None else str(description),
+                "description": merged["description"],
                 "items": normalized,
                 "total_kopecks": total,
                 "total_difference_confirmed": bool(mismatch and allow_difference),
@@ -231,10 +238,6 @@ class Documents:
                 (document_id, content, sha256(content).hexdigest()),
             )
             if consume_draft:
-                connection.execute(
-                    "UPDATE repairs SET description=?, recommendations=? WHERE id=?",
-                    (payload["description"], payload["recommendations"], repair_id),
-                )
                 connection.execute("DELETE FROM document_drafts WHERE repair_id=?", (repair_id,))
         return self.get(document_id)
 

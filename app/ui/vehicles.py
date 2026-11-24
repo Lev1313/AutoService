@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 from app.services.catalog import VehicleCatalog, make_search_text, model_search_text, name_key
 from app.services.records import (
     Records,
+    RepairFieldConflict,
     RestoreMileageConflict,
     amount_text,
     mileage_text,
@@ -78,6 +79,40 @@ def make_table(headers: tuple[str, ...]) -> QTableWidget:
 
 class SafeDialog(QDialog):
     """Закрытие и Esc не теряют изменённую форму; Ctrl+S сохраняет её."""
+
+    def save_shared_fields(self, values, expected, save):
+        values, expected = dict(values), dict(expected)
+        labels = {
+            "description": "Ход работ",
+            "recommendations": "Рекомендации",
+            "amount_kopecks": "Общая стоимость, ₽",
+        }
+        while True:
+            try:
+                return save(values, expected)
+            except RepairFieldConflict as conflict:
+                key = conflict.field
+                stored, proposed = conflict.stored, conflict.proposed
+                if key == "amount_kopecks":
+                    stored, proposed = amount_text(stored), amount_text(proposed)
+                prompt = QMessageBox(self)
+                prompt.setWindowTitle("Правки в двух окнах")
+                prompt.setTextFormat(Qt.TextFormat.PlainText)
+                prompt.setText(
+                    f"{labels[key]}\n\nСохранённый вариант:\n{stored or '〈пусто〉'}"
+                    f"\n\nМой вариант:\n{proposed or '〈пусто〉'}"
+                )
+                mine = prompt.addButton("Мой вариант", QMessageBox.ButtonRole.ActionRole)
+                theirs = prompt.addButton("Сохранённый вариант", QMessageBox.ButtonRole.ActionRole)
+                cancel = prompt.addButton("Отмена", QMessageBox.ButtonRole.RejectRole)
+                prompt.setDefaultButton(cancel)
+                prompt.setEscapeButton(cancel)
+                prompt.exec()
+                if prompt.clickedButton() not in (mine, theirs):
+                    return None
+                expected[key] = conflict.stored
+                if prompt.clickedButton() == theirs:
+                    values[key] = conflict.stored
 
     def prepare_guard(self):
         self.original = self.state()
@@ -530,14 +565,20 @@ class RepairDialog(SafeDialog):
                 if not allow_unverified:
                     return
                 values["mileage_verified"] = False
-            repair_id = self.records.save_repair(
-                self.vehicle_id,
+            repair_id = self.save_shared_fields(
                 values,
-                self.repair.get("id"),
-                allow_unverified=allow_unverified,
-                appointment_id=self.appointment["id"] if self.appointment else None,
-                expected_notes=self.repair,
+                self.repair,
+                lambda proposed, expected: self.records.save_repair(
+                    self.vehicle_id,
+                    proposed,
+                    self.repair.get("id"),
+                    allow_unverified=allow_unverified,
+                    appointment_id=self.appointment["id"] if self.appointment else None,
+                    expected_notes=expected,
+                ),
             )
+            if repair_id is None:
+                return False
         except ERRORS as error:
             QMessageBox.warning(self, "Не удалось сохранить ремонт", str(error))
             return False
@@ -545,6 +586,9 @@ class RepairDialog(SafeDialog):
             row for row in self.records.repairs(self.vehicle_id) if row["id"] == repair_id
         )
         self.mileage_verified.setChecked(bool(self.repair["verified"]))
+        self.description.setPlainText(self.repair["description"])
+        self.recommendations.setPlainText(self.repair["recommendations"])
+        self.amount.setText(amount_text(self.repair["amount_kopecks"]))
         self.suggest_mileage()
         self.original = self.state()
         self.finish_button.setVisible(not self.repair["completed"])
@@ -898,6 +942,9 @@ def open_repair_window(records, vehicle_id, owner, repair=None, *, appointment=N
                         widget.setPlainText(editor.repair[key])
                         document.original[key] = editor.repair[key]
                         document.expected_notes[key] = editor.repair[key]
+                if document.expected_notes["amount_kopecks"] != editor.repair["amount_kopecks"]:
+                    document.expected_notes["amount_kopecks"] = editor.repair["amount_kopecks"]
+                    document.changed()
             workspace.repair_saved.emit(vehicle_id, repair_id)
 
         editor.repair_saved.connect(saved)
