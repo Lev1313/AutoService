@@ -187,8 +187,11 @@ def prepare(root):
     export_database(path, root / "excel-export", "xlsx")
     check((root / "excel-export" / "AutoService.xlsx").is_file(), "Выгрузка XLSX")
     backup = backup_database(path, root / "release-backup.sqlite3")
+    before_restore = documents.create(appointment_repair)["number"]
     records.save_vehicle(records.vehicle(car) | {"plate": "ИЗМЕНЕНО-ДЛЯ-ТЕСТА"}, car)
     restore_database(path, backup)
+    after_restore = documents.create(appointment_repair)["number"]
+    check(after_restore != before_restore, "Новая серия документов после восстановления")
     check(records.vehicle(car)["plate"] == "тест-пилот", "Восстановление машины")
     check(documents.pdf_content(detailed["id"]) == content, "Восстановление PDF")
     check(importer.provenance(imported["repair_id"])["original_bytes"] == raw, "Архив TXT в копии")

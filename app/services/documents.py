@@ -205,7 +205,13 @@ class Documents:
                 "VALUES (?,?,?,?,?)",
                 (uuid4().hex, repair_id, created, kind, json.dumps(payload, ensure_ascii=False)),
             ).lastrowid
-            number = f"{'СЛ' if layout == 'service_sheet' else 'КВ'}-{document_id:06d}"
+            prefix = "СЛ" if layout == "service_sheet" else "КВ"
+            series = connection.execute(
+                "SELECT value FROM app_metadata WHERE key='document_series'"
+            ).fetchone()
+            if series:
+                prefix = f"{prefix}-{series[0]}"
+            number = f"{prefix}-{document_id:06d}"
             connection.execute(
                 "UPDATE documents SET number=? WHERE id=?",
                 (number, document_id),

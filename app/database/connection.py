@@ -5,6 +5,7 @@ from contextlib import closing, contextmanager
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
+from secrets import token_hex
 from shutil import copy2
 from tempfile import TemporaryDirectory
 from uuid import uuid4
@@ -370,6 +371,12 @@ def prepare_restore(path: Path, source_path: Path, prepared: Path) -> None:
             initialize_database(prepared)
         with closing(sqlite3.connect(prepared)) as staged:
             validate_backup_content(staged)
+            # Серия меняется в подготовленной базе до её установки обоими способами.
+            with staged:
+                staged.execute(
+                    "INSERT OR REPLACE INTO app_metadata(key,value) VALUES ('document_series',?)",
+                    (token_hex(6).upper(),),
+                )
     except sqlite3.Error as error:
         raise ValueError(f"Не удалось проверить резервную копию: {error}") from error
 

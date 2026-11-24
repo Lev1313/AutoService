@@ -16,6 +16,7 @@ from app.database.connection import (
     backup_database,
     connect,
     initialize_database,
+    recover_database,
     restore_database,
 )
 from app.services.documents import Documents, TotalMismatch, normalize_items
@@ -110,6 +111,29 @@ def test_pdf_integrity_and_backup_restore_include_original_bytes(data):
         service.pdf_content(document["id"])
     restore_database(records.path, backup)
     assert Documents(records.path).pdf_content(document["id"]) == original
+
+
+@pytest.mark.parametrize("layout", ["receipt", "service_sheet"])
+def test_new_document_series_after_each_restore(data, layout):
+    records, service, _, repair = data
+    archived = service.create(repair, layout=layout)
+    archived_pdf = service.pdf_content(archived["id"])
+    snapshot = backup_database(records.path)
+    first = service.create(repair, layout=layout)
+    numbers = {first["number"]}
+    for restore in (restore_database, recover_database):
+        if restore is recover_database:
+            records.path.write_bytes(b"damaged test database")
+        restore(records.path, snapshot)
+        reopened = Documents(records.path)
+        assert reopened.get(archived["id"]) == archived
+        assert reopened.pdf_content(archived["id"]) == archived_pdf
+        issued = reopened.create(repair, layout=layout)
+        assert issued["id"] == first["id"]
+        assert issued["number"] not in numbers
+        numbers.add(issued["number"])
+        following = Documents(records.path).create(repair, layout=layout)
+        assert following["number"].rsplit("-", 1)[0] == issued["number"].rsplit("-", 1)[0]
 
 
 def test_v3_migration_preserves_calendar_state_and_pre_update_backup(tmp_path):
