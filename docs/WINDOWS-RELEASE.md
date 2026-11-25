@@ -10,9 +10,9 @@
 
 ## Опубликованный выпуск
 
-[AutoService v0.5.17](https://github.com/Lev1313/AutoService/releases/tag/v0.5.17) содержит
-переносимый ZIP для Windows x64, PDF-руководство и контрольные суммы. Для воспроизведения
-опубликованной версии используйте тег.
+[Последний выпуск AutoService](https://github.com/Lev1313/AutoService/releases/latest) содержит
+переносимый ZIP для Windows x64, PDF-руководство и файл `SHA256SUMS.txt`.
+Для сборки конкретной версии используйте тег со страницы этого выпуска.
 
 Начиная с 0.5.17 ZIP содержит папку `AutoService-<версия>`.
 Распакуйте весь ZIP и запустите `AutoService.exe` из папки выпуска. Оставьте `_internal`
