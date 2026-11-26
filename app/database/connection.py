@@ -10,7 +10,7 @@ from shutil import copy2
 from tempfile import TemporaryDirectory
 from uuid import uuid4
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 SCHEMA_V2 = (
     """CREATE TABLE contacts (id INTEGER PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '')""",
@@ -248,7 +248,7 @@ def initialize_database(path: Path) -> None:
         if not connection.execute(
             "SELECT 1 FROM app_metadata WHERE key='repair_notes_synced'"
         ).fetchone():
-            if version == 10:
+            if version >= 10:
                 connection.execute("""CREATE TEMP TABLE recovered_notes AS
                     SELECT id, COALESCE(
                         (SELECT json_extract(payload,'$.recommendations') FROM document_drafts
@@ -263,11 +263,18 @@ def initialize_database(path: Path) -> None:
                 changed = """SELECT n.id FROM recovered_notes n JOIN repairs r ON r.id=n.id
                              WHERE n.notes IS NOT NULL AND n.notes<>r.recommendations"""
                 if connection.execute(f"SELECT EXISTS({changed})").fetchone()[0]:
-                    backup_database(path)
+                    if version == SCHEMA_VERSION:
+                        backup_database(path)
                     connection.execute("""UPDATE repairs SET recommendations=n.notes
                         FROM recovered_notes n WHERE n.id=repairs.id AND n.notes IS NOT NULL
                         AND n.notes<>repairs.recommendations""")
             connection.execute("INSERT INTO app_metadata VALUES ('repair_notes_synced','1')")
+        if version < 11:
+            connection.execute("""CREATE TABLE document_copies (
+                id INTEGER PRIMARY KEY, document_id INTEGER NOT NULL REFERENCES documents(id),
+                revision INTEGER NOT NULL CHECK(revision > 0), created_at TEXT NOT NULL,
+                manual_sheet TEXT NOT NULL, content BLOB NOT NULL, sha256 TEXT NOT NULL,
+                UNIQUE(document_id, revision))""")
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         validate_tables(connection)
 
@@ -292,6 +299,8 @@ def validate_tables(connection):
         "SELECT repair_id, payload FROM document_drafts",
         "SELECT id, number, repair_id, created_at, kind, payload FROM documents",
         "SELECT document_id, content, sha256 FROM document_files",
+        "SELECT id, document_id, revision, created_at, manual_sheet, content, sha256 "
+        "FROM document_copies",
         "SELECT origin, state_known, undated_km, carried_km, carried_on, deleted_at FROM repairs",
         "SELECT id, sha256, original_bytes, decoded_text, encoding, original_name, imported_at "
         "FROM import_sources",
@@ -342,6 +351,12 @@ def validate_backup_content(connection):
             raise ValueError(f"В копии отсутствует PDF документа {number}.")
         if not isinstance(content, bytes) or sha256(content).hexdigest() != digest:
             raise ValueError(f"В копии повреждён PDF документа {number}.")
+    for number, revision, content, digest in connection.execute(
+        """SELECT d.number, c.revision, c.content, c.sha256 FROM document_copies c
+           JOIN documents d ON d.id=c.document_id"""
+    ):
+        if not isinstance(content, bytes) or sha256(content).hexdigest() != digest:
+            raise ValueError(f"В копии повреждён PDF документа {number} · копия {revision}.")
     for source_id, name, content, digest in connection.execute(
         "SELECT id, original_name, original_bytes, sha256 FROM import_sources ORDER BY id"
     ):

@@ -4,7 +4,17 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QBuffer, QIODevice, QRectF, QSignalBlocker, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QBuffer,
+    QIODevice,
+    QMargins,
+    QRectF,
+    QSignalBlocker,
+    QSize,
+    Qt,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import QKeySequence, QPageSize, QPainter, QShortcut
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPdfWidgets import QPdfView
@@ -28,9 +38,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.services.documents import Documents, TotalMismatch, item_price_total, normalize_items
+from app.services.documents import (
+    Documents,
+    SheetSourceChanged,
+    TotalMismatch,
+    item_price_total,
+    normalize_items,
+)
 from app.services.receipt_pdf import pdf_bytes, save_pdf
 from app.services.records import amount_text
+from app.services.service_sheet_pdf import sheet_signature
+from app.ui.sheet_editor import SheetEditor
 from app.ui.vehicles import ERRORS, SafeDialog, plain_label, primary_button, vehicle_label
 
 ITEM_FIELDS = ("title", "quantity", "price")
@@ -125,6 +143,8 @@ class DocumentDialog(SafeDialog):
         self.service = Documents(records.path)
         self.records, self.repair_id = records, repair_id
         self.busy = True
+        self.manual_sheet = None
+        self.sheet_loaded = False
         self.previous_index = -1
         self.current_document = None
         self.content = None
@@ -231,6 +251,9 @@ class DocumentDialog(SafeDialog):
         self.buffer = None
         self.view = QPdfView()
         self.view.setDocument(self.pdf)
+        self.view.setDocumentMargins(QMargins(6, 6, 6, 6))
+        self.view.setPageSpacing(6)
+        self.view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.view.setPageMode(QPdfView.PageMode.MultiPage)
         self.view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
         self.preview_panel = QStackedWidget()
@@ -239,7 +262,20 @@ class DocumentDialog(SafeDialog):
         self.preview_note.setContentsMargins(18, 12, 18, 12)
         self.preview_panel.addWidget(self.preview_note)
         self.preview_panel.addWidget(self.view)
-        split.addWidget(self.preview_panel)
+        self.sheet_editor = SheetEditor(self)
+        self.sheet_editor.done.connect(self.finish_sheet)
+        self.sheet_editor.canvas.edited.connect(self.sheet_changed)
+        self.sheet_editor.canvas.failed.connect(self.sheet_error)
+        self.preview_panel.addWidget(self.sheet_editor)
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        self.edit_sheet = QPushButton("Редактировать лист")
+        self.edit_sheet.setAutoDefault(False)
+        self.edit_sheet.clicked.connect(self.start_sheet)
+        right_layout.addWidget(self.edit_sheet, alignment=Qt.AlignmentFlag.AlignLeft)
+        right_layout.addWidget(self.preview_panel, 1)
+        split.addWidget(right)
         split.setSizes([530, 650])
         layout.addWidget(split, 1)
         self.message = plain_label("")
@@ -276,20 +312,27 @@ class DocumentDialog(SafeDialog):
         self.load_selection(self.history.currentIndex())
         self.prepare_guard()
 
-    def load_history(self, selected=None):
+    def load_history(self, selected=None, revision=0):
         self.deleted_repair = bool(self.source_repair()["deleted_at"])
         documents = self.service.history(self.repair_id)
         self.history.blockSignals(True)
         self.history.clear()
-        for document in documents:
+        selected_index = 0 if documents else -1
+        for index, document in enumerate(documents):
             kind = "Заказ-наряд"
             if document["number"].startswith("СЛ-"):
                 kind = "Сервисный лист"
             stamp = datetime.fromisoformat(document["created_at"]).strftime("%d.%m.%Y %H:%M")
-            self.history.addItem(f"{document['number']} · {stamp} · {kind}", document["id"])
+            label = document["number"]
+            if document["revision"]:
+                label += f" · копия {document['revision']}"
+            self.history.addItem(f"{label} · {stamp} · {kind}", document["id"])
+            self.history.setItemData(index, document["revision"], Qt.ItemDataRole.UserRole + 1)
+            if (document["id"], document["revision"]) == (selected, revision):
+                selected_index = index
         self.history.setPlaceholderText("Выберите документ" if documents else "Документов пока нет")
         self.history.setEnabled(bool(documents))
-        index = self.history.findData(selected) if selected else 0 if documents else -1
+        index = selected_index
         self.history.setCurrentIndex(index)
         self.history.blockSignals(False)
         self.previous_index = index
@@ -300,27 +343,55 @@ class DocumentDialog(SafeDialog):
     def switch_history(self, index):
         if self.busy:
             return
+        target = self.history.itemData(index)
+        revision = self.history.itemData(index, Qt.ItemDataRole.UserRole + 1) or 0
         if self.state() != self.original:
-            choice = QMessageBox.question(
-                self,
-                "Сохранить черновик?",
-                "Перед переключением сохранить текущий черновик?",
-                QMessageBox.StandardButton.Save
-                | QMessageBox.StandardButton.Discard
-                | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Save,
-            )
-            if choice == QMessageBox.StandardButton.Cancel:
-                self.history.blockSignals(True)
-                self.history.setCurrentIndex(self.previous_index)
-                self.history.blockSignals(False)
+            choice = self.unsaved_choice()
+            if choice == QMessageBox.StandardButton.Cancel or (
+                choice == QMessageBox.StandardButton.Save and not self.save(close=False)
+            ):
+                with QSignalBlocker(self.history):
+                    self.history.setCurrentIndex(self.previous_index)
                 return
-            if choice == QMessageBox.StandardButton.Save and not self.save(close=False):
-                self.history.blockSignals(True)
-                self.history.setCurrentIndex(self.previous_index)
-                self.history.blockSignals(False)
-                return
+            if target is not None:
+                self.load_history(target, revision)
+                index = self.history.currentIndex()
+            else:
+                with QSignalBlocker(self.history):
+                    self.history.setCurrentIndex(-1)
+                index = -1
         self.load_selection(index)
+
+    def unsaved_choice(self):
+        buttons = QMessageBox.StandardButton
+        if not self.manual_sheet:
+            return QMessageBox.question(
+                self,
+                "Несохранённые изменения",
+                "Сохранить текущий черновик?",
+                buttons.Save | buttons.Discard | buttons.Cancel,
+                buttons.Save,
+            )
+        box = QMessageBox(self)
+        box.setWindowTitle("Несохранённые изменения")
+        box.setText("Сохранить текущие изменения документа?")
+        save = box.addButton("Сохранить", QMessageBox.ButtonRole.AcceptRole)
+        discard = box.addButton("Не сохранять", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton("Продолжить редактирование", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        return {save: buttons.Save, discard: buttons.Discard}.get(
+            box.clickedButton(), buttons.Cancel
+        )
+
+    def reject(self):
+        if self.state() != self.original:
+            choice = self.unsaved_choice()
+            if choice == QMessageBox.StandardButton.Cancel:
+                return
+            if choice == QMessageBox.StandardButton.Save:
+                self.save()
+                return
+        QDialog.reject(self)
 
     def load_selection(self, index):
         try:
@@ -336,6 +407,10 @@ class DocumentDialog(SafeDialog):
         self.busy = True
         self.preview_timer.stop()
         self.previous_index = index
+        self.sheet_loaded = False
+        self.manual_sheet = None
+        self.sheet_editor.canvas.timer.stop()
+        revision = self.history.itemData(index, Qt.ItemDataRole.UserRole + 1) or 0
         document_id = self.history.itemData(index)
         saved = document_id is not None
         editable = not saved and not self.deleted_repair
@@ -356,10 +431,15 @@ class DocumentDialog(SafeDialog):
             if saved
             else "Сохранить документ с номером и открыть окно печати Windows."
         )
-        self.current_document = self.service.get(document_id) if saved else None
+        self.current_document = self.service.get(document_id, revision) if saved else None
         if self.current_document:
             self.document_status.setText(f"Оформлена · {self.current_document['number']}")
+            if revision:
+                self.document_status.setText(
+                    f"Оформлена · {self.current_document['number']} · копия {revision}"
+                )
             payload = self.current_document["payload"]
+            self.manual_sheet = payload.get("manual_sheet")
             values = {
                 "kind": self.current_document["kind"],
                 "layout": payload.get("layout", "receipt"),
@@ -388,6 +468,8 @@ class DocumentDialog(SafeDialog):
                 "items": json.loads(repair["document_items"]),
             }
             values = {"recommendations": repair["recommendations"]} | with_repair
+        if not saved:
+            self.manual_sheet = values.get("manual_sheet")
         selected_layout = values.get("layout", "receipt")
         self.kind.setCurrentIndex(max(0, self.kind.findData(selected_layout)))
         self.description.setPlainText(values["description"])
@@ -399,8 +481,9 @@ class DocumentDialog(SafeDialog):
         self.original = self.state()
         self.busy = False
         self.update_total()
+        self.sheet_controls()
         if saved:
-            self.load_pdf(self.service.pdf_content(self.current_document["id"]))
+            self.load_pdf(self.service.pdf_content(self.current_document["id"], revision))
             self.message.setText("В окне печати Windows выберите принтер.")
         elif editable:
             self.message.setText("Документ получит номер при оформлении.")
@@ -479,7 +562,95 @@ class DocumentDialog(SafeDialog):
             "recommendations": self.recommendations.toPlainText(),
             "description": self.description.toPlainText(),
             "items": items,
-        }
+        } | (
+            {"manual_sheet": self.manual_sheet}
+            if self.manual_sheet is not None and self.kind.currentData() == "service_sheet"
+            else {}
+        )
+
+    def editing_sheet(self):
+        return self.preview_panel.currentWidget() is self.sheet_editor
+
+    def copy_changed(self):
+        return self.current_document is not None and self.manual_sheet != self.current_document[
+            "payload"
+        ].get("manual_sheet")
+
+    def sheet_controls(self):
+        editing = self.editing_sheet()
+        saved = self.current_document is not None
+        self.edit_sheet.setVisible(
+            self.kind.currentData() == "service_sheet"
+            and not editing
+            and (saved or not self.deleted_repair)
+        )
+        self.edit_sheet.setText("Редактировать копию" if saved else "Редактировать лист")
+        for widget in (self.kind, self.description, self.items_panel, self.recommendations_panel):
+            widget.setEnabled(not saved and not self.deleted_repair and not editing)
+        if saved:
+            dirty = self.copy_changed()
+            self.draft_button.setVisible(dirty)
+            self.draft_button.setEnabled(dirty)
+            self.draft_button.setText("Сохранить копию")
+            self.print_button.setText("Сохранить копию и печатать" if dirty else "Печать")
+            self.export_button.setText("Копия в PDF" if dirty else "Сохранить PDF")
+            self.export_button.setEnabled(self.content is not None or dirty)
+        else:
+            self.draft_button.setText("Сохранить черновик")
+
+    def start_sheet(self):
+        self.preview_timer.stop()
+        self.commit_item_editor()
+        try:
+            archive = self.current_document
+            snapshot = archive or self.service.create(
+                self.repair_id, **self.state(), allow_difference=True, preview=True
+            )
+            scroll = self.view.verticalScrollBar()
+            fraction = scroll.value() / max(1, scroll.maximum())
+            canvas = self.sheet_editor.canvas
+            if not self.sheet_loaded:
+                if self.manual_sheet:
+                    snapshot = snapshot | {
+                        "payload": snapshot["payload"] | {"manual_sheet": self.manual_sheet}
+                    }
+                canvas.open(snapshot, self.content if archive and not self.copy_changed() else None)
+                self.sheet_loaded = True
+            self.preview_panel.setCurrentWidget(self.sheet_editor)
+            self.sheet_controls()
+            canvas.update_range()
+            canvas.verticalScrollBar().setValue(
+                round(fraction * canvas.verticalScrollBar().maximum())
+            )
+            canvas.setFocus()
+            self.sheet_editor.update_controls()
+        except (*ERRORS, RuntimeError) as error:
+            QMessageBox.warning(self, "Не удалось открыть редактор", str(error))
+
+    def sheet_changed(self):
+        if self.busy or not self.sheet_loaded:
+            return
+        canvas = self.sheet_editor.canvas
+        manual = canvas.manual()
+        if manual != canvas.initial_manual:
+            self.manual_sheet = manual
+        else:
+            self.manual_sheet = canvas.snapshot["payload"].get("manual_sheet")
+        self.sheet_controls()
+
+    def sheet_error(self, message):
+        self.message.setText(f"Проверьте печатный лист. {message}")
+
+    def finish_sheet(self):
+        canvas = self.sheet_editor.canvas
+        scroll = canvas.verticalScrollBar()
+        fraction = scroll.value() / max(1, scroll.maximum())
+        self.preview()
+        if self.manual_sheet is None:
+            self.sheet_loaded = False
+        self.sheet_controls()
+        bar = self.view.verticalScrollBar()
+        bar.setValue(round(fraction * bar.maximum()))
 
     def update_total(self):
         rows = []
@@ -503,6 +674,11 @@ class DocumentDialog(SafeDialog):
     def changed(self, *_):
         if self.busy:
             return
+        self.sheet_controls()
+        if self.editing_sheet():
+            return
+        if not self.manual_sheet:
+            self.sheet_loaded = False
         self.clear_preview("Обновляем предпросмотр…")
         self.document_status.setText("Черновик")
         self.message.setText("Документ получит номер при оформлении.")
@@ -533,9 +709,21 @@ class DocumentDialog(SafeDialog):
         self.export_button.setEnabled(saved)
         self.print_button.setEnabled(True)
         self.preview_panel.setCurrentWidget(self.view)
+        self.sheet_controls()
 
     def preview(self):
         try:
+            if self.current_document:
+                doc = self.current_document
+                if self.copy_changed():
+                    self.load_pdf(
+                        pdf_bytes(
+                            doc | {"payload": doc["payload"] | {"manual_sheet": self.manual_sheet}}
+                        )
+                    )
+                else:
+                    self.load_pdf(self.service.pdf_content(doc["id"], doc["revision"]))
+                return
             draft = self.service.create(
                 self.repair_id, **self.state(), allow_difference=True, preview=True
             )
@@ -549,30 +737,44 @@ class DocumentDialog(SafeDialog):
         self.commit_item_editor()
 
         def issue(value, expected):
-            try:
-                result = self.service.create(
-                    self.repair_id, **value, consume_draft=True, expected_notes=expected
-                )
-            except TotalMismatch as error:
-                if (
-                    QMessageBox.question(
-                        self,
-                        "Проверьте итог",
-                        str(error),
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                        QMessageBox.StandardButton.No,
+            options = {"consume_draft": True, "expected_notes": expected}
+            while True:
+                try:
+                    return self.service.create(self.repair_id, **value, **options)
+                except SheetSourceChanged as error:
+                    box = QMessageBox(self)
+                    box.setWindowTitle("Изменились данные для печати")
+                    box.setText("Какой сервисный лист оформить?")
+                    keep = box.addButton("Оставить мой лист", QMessageBox.ButtonRole.AcceptRole)
+                    rebuild = box.addButton(
+                        "Собрать из обновлённых данных", QMessageBox.ButtonRole.ActionRole
                     )
-                    != QMessageBox.StandardButton.Yes
-                ):
+                    box.addButton("Продолжить редактирование", QMessageBox.ButtonRole.RejectRole)
+                    box.exec()
+                    if box.clickedButton() == keep:
+                        options["keep_manual"] = sheet_signature(error.blocks)
+                        continue
+                    if box.clickedButton() == rebuild:
+                        self.start_sheet()
+                        if self.editing_sheet():
+                            canvas = self.sheet_editor.canvas
+                            canvas.source = sheet_signature(error.blocks)
+                            canvas.populate(error.blocks, undoable=True)
+                            canvas.refresh()
                     return False
-                result = self.service.create(
-                    self.repair_id,
-                    **value,
-                    allow_difference=True,
-                    consume_draft=True,
-                    expected_notes=expected,
-                )
-            return result
+                except TotalMismatch as error:
+                    if (
+                        QMessageBox.question(
+                            self,
+                            "Проверьте итог",
+                            str(error),
+                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                            QMessageBox.StandardButton.No,
+                        )
+                        != QMessageBox.StandardButton.Yes
+                    ):
+                        return False
+                    options["allow_difference"] = True
 
         try:
             result = self.save_shared_fields(self.state(), self.expected_notes, issue)
@@ -593,14 +795,33 @@ class DocumentDialog(SafeDialog):
             QMessageBox.warning(self, f"Заказ-наряд {result['number']} оформлен", str(error))
         return self.content is not None
 
+    def prepare_saved_output(self):
+        if self.copy_changed() and not self.save(close=False):
+            return False
+        doc = self.current_document
+        try:
+            self.load_pdf(self.service.pdf_content(doc["id"], doc["revision"]))
+        except (*ERRORS, RuntimeError) as error:
+            self.clear_preview(str(error))
+            QMessageBox.warning(self, "Не удалось открыть сохранённый PDF", str(error))
+            return False
+        return True
+
     def print_or_create(self):
-        if self.current_document or self.create():
+        if (self.current_document or self.create()) and self.prepare_saved_output():
             self.print_document()
 
     def save(self, checked=False, *, close=True):
         self.commit_item_editor()
         try:
-            if not self.current_document:
+            if self.copy_changed():
+                document_id = self.current_document["id"]
+                revision = self.service.save_copy(document_id, self.manual_sheet)
+                self.load_history(document_id, revision)
+                self.load_selection(self.history.currentIndex())
+                if self.content is None:
+                    return False
+            elif not self.current_document:
                 merged = self.save_shared_fields(
                     self.state(),
                     self.expected_notes,
@@ -615,8 +836,8 @@ class DocumentDialog(SafeDialog):
                 self.recommendations.setPlainText(merged["recommendations"])
                 self.notes_saved.emit()
             self.original = self.state()
-        except ERRORS as error:
-            QMessageBox.warning(self, "Не удалось сохранить черновик", str(error))
+        except (*ERRORS, RuntimeError) as error:
+            QMessageBox.warning(self, "Не удалось сохранить документ", str(error))
             return False
         if close:
             self.accept()
@@ -635,12 +856,15 @@ class DocumentDialog(SafeDialog):
             self.preview()
 
     def export(self):
-        if not self.content or not self.current_document:
+        if not self.current_document or not self.prepare_saved_output():
             return
+        name = self.current_document["number"]
+        if self.current_document["revision"]:
+            name += f"-копия-{self.current_document['revision']}"
         filename, _ = QFileDialog.getSaveFileName(
             self,
             "Сохранить документ",
-            f"{self.current_document['number']}.pdf",
+            f"{name}.pdf",
             "PDF (*.pdf)",
         )
         if not filename:

@@ -432,6 +432,26 @@ def reopen(root, report):
         check((root / "service-sheet-printed.pdf").stat().st_size > 1000, "Печать сервисного листа")
         QTest.qWait(200)
         check(dialog.grab().save(str(root / "service-sheet-window.png")), "Снимок сервисного листа")
+        dialog.edit_sheet.click()
+        check(dialog.editing_sheet(), "Открытие редактора архивного листа")
+        canvas = dialog.sheet_editor.canvas
+        cursor = canvas.input.document().find("Тестовая")
+        check(not cursor.isNull(), "Выделение слова в редакторе")
+        canvas.input.setTextCursor(cursor)
+        canvas.set_size(12)
+        QTest.keyClicks(canvas, "Demo")
+        canvas.refresh()
+        check(dialog.grab().save(str(root / "sheet-editor.png")), "Снимок ручной правки")
+        check(dialog.save(close=False), "Сохранение копии листа")
+        check("Demo" in dialog.pdf.getAllText(0).text(), "Последнее изменение в PDF копии")
+        check(dialog.current_document["revision"] == 1, "Копия в истории")
+        printer.setOutputFileName(str(root / "sheet-copy-printed.pdf"))
+        print_pdf(dialog.pdf, printer)
+        check(
+            sha256(documents.pdf_content(report["service_sheet"])).hexdigest()
+            == report["service_sheet_sha256"],
+            "Исходный PDF после редактирования копии",
+        )
         dialog.new_button.click()
         check(
             dialog.kind.currentData() == "service_sheet", "Новый документ открывает сервисный лист"

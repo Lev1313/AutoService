@@ -12,6 +12,12 @@ from app.services.records import merge_repair_fields, parse_amount
 SETTINGS = ("name", "address", "phone", "requisites")
 
 
+class SheetSourceChanged(ValueError):
+    def __init__(self, blocks):
+        super().__init__("Данные ремонта изменились после ручной правки листа.")
+        self.blocks = blocks
+
+
 class TotalMismatch(ValueError):
     pass
 
@@ -137,6 +143,8 @@ class Documents:
         preview=False,
         *,
         consume_draft=False,
+        manual_sheet=None,
+        keep_manual=False,
         layout="receipt",
         recommendations=None,
         expected_notes=None,
@@ -198,6 +206,16 @@ class Documents:
                 "total_kopecks": total,
                 "total_difference_confirmed": bool(mismatch and allow_difference),
             }
+            if layout == "service_sheet" and manual_sheet is not None:
+                from app.services.service_sheet_pdf import sheet_blocks, sheet_signature
+
+                source = sheet_blocks(payload)
+                if not preview and sheet_signature(source) not in (
+                    keep_manual,
+                    manual_sheet["source"],
+                ):
+                    raise SheetSourceChanged(source)
+                payload["manual_sheet"] = manual_sheet
             created = datetime.now().isoformat(timespec="seconds")
             if preview:
                 return {
@@ -241,12 +259,46 @@ class Documents:
                 connection.execute("DELETE FROM document_drafts WHERE repair_id=?", (repair_id,))
         return self.get(document_id)
 
-    def pdf_content(self, document_id):
+    def save_copy(self, document_id, manual_sheet):
+        from app.services.receipt_pdf import pdf_bytes
+
+        document = self.get(document_id)
+        if document["payload"].get("layout") != "service_sheet":
+            raise ValueError("Копию можно редактировать только у сервисного листа.")
+        document["payload"]["manual_sheet"] = manual_sheet
+        content = pdf_bytes(document)
         with connect(self.path) as connection:
-            row = connection.execute(
-                "SELECT content, sha256 FROM document_files WHERE document_id=?",
+            connection.execute("BEGIN IMMEDIATE")
+            revision = connection.execute(
+                "SELECT COALESCE(MAX(revision),0)+1 FROM document_copies WHERE document_id=?",
                 (document_id,),
-            ).fetchone()
+            ).fetchone()[0]
+            connection.execute(
+                "INSERT INTO document_copies(document_id,revision,created_at,"
+                "manual_sheet,content,sha256) "
+                "VALUES (?,?,?,?,?,?)",
+                (
+                    document_id,
+                    revision,
+                    datetime.now().isoformat(timespec="seconds"),
+                    json.dumps(manual_sheet, ensure_ascii=False),
+                    content,
+                    sha256(content).hexdigest(),
+                ),
+            )
+        return revision
+
+    def pdf_content(self, document_id, revision=0):
+        with connect(self.path) as connection:
+            if revision:
+                row = connection.execute(
+                    "SELECT content,sha256 FROM document_copies WHERE document_id=? AND revision=?",
+                    (document_id, revision),
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    "SELECT content,sha256 FROM document_files WHERE document_id=?", (document_id,)
+                ).fetchone()
         if row is None:
             raise ValueError("Сохранённый PDF не найден.")
         content = bytes(row["content"])
@@ -259,13 +311,17 @@ class Documents:
             return [
                 dict(row)
                 for row in connection.execute(
-                    "SELECT id, number, created_at, kind FROM documents "
-                    "WHERE repair_id=? ORDER BY id DESC",
-                    (repair_id,),
+                    """SELECT id, number, created_at, kind, 0 AS revision
+                    FROM documents WHERE repair_id=?
+                    UNION ALL SELECT d.id,d.number,c.created_at,d.kind,c.revision
+                    FROM document_copies c JOIN documents d ON d.id=c.document_id
+                    WHERE d.repair_id=?
+                    ORDER BY id DESC,revision DESC""",
+                    (repair_id, repair_id),
                 )
             ]
 
-    def get(self, document_id):
+    def get(self, document_id, revision=0):
         with connect(self.path) as connection:
             row = connection.execute(
                 "SELECT * FROM documents WHERE id=?", (document_id,)
@@ -274,4 +330,16 @@ class Documents:
             raise ValueError("Документ не найден.")
         value = dict(row)
         value["payload"] = json.loads(value["payload"])
+        if revision:
+            with connect(self.path) as connection:
+                copy = connection.execute(
+                    "SELECT created_at,manual_sheet FROM document_copies "
+                    "WHERE document_id=? AND revision=?",
+                    (document_id, revision),
+                ).fetchone()
+            if copy is None:
+                raise ValueError("Копия документа не найдена.")
+            value["created_at"] = copy["created_at"]
+            value["payload"]["manual_sheet"] = json.loads(copy["manual_sheet"])
+        value["revision"] = revision
         return value

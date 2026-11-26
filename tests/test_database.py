@@ -7,6 +7,7 @@ from app.database.connection import SCHEMA_VERSION, initialize_database, restore
 
 
 def set_old_schema(connection, version):
+    connection.execute("DROP TABLE document_copies")
     connection.execute("ALTER TABLE repairs DROP COLUMN document_items")
     connection.execute("ALTER TABLE repairs DROP COLUMN recommendations")
     connection.execute(f"PRAGMA user_version = {version}")
@@ -91,7 +92,7 @@ def test_v9_migration_preserves_draft_and_existing_v10_fields(tmp_path):
         connection.execute("UPDATE repairs SET recommendations='Записано в схеме 10'")
     initialize_database(path)
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone() == (10,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (SCHEMA_VERSION,)
         assert connection.execute("SELECT recommendations FROM repairs").fetchone() == (
             "Записано в схеме 10",
         )

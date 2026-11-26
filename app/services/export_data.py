@@ -35,6 +35,7 @@ TABLES = {
     "import_batches": "История импорта",
     "document_files": "Файлы PDF",
     "app_metadata": "Метаданные",
+    "document_copies": "Копии документов",
 }
 LABELS = {
     "id": "ID",
@@ -165,8 +166,8 @@ def export_database(path: Path, destination: Path, format="txt", include_files=T
             rows = []
             for row in connection.execute(f'SELECT * FROM "{table}" ORDER BY rowid'):
                 record = dict(row)
-                if table in ("document_files", "import_sources"):
-                    binary_key = "content" if table == "document_files" else "original_bytes"
+                if table in ("document_files", "document_copies", "import_sources"):
+                    binary_key = "original_bytes" if table == "import_sources" else "content"
                     binary = record.pop(binary_key)
                     record["bytes"] = len(binary)
                     if sha256(binary).hexdigest() != record["sha256"]:
@@ -180,6 +181,11 @@ def export_database(path: Path, destination: Path, format="txt", include_files=T
                             if table == "document_files"
                             else f"originals/source-{record['id']}.txt"
                         )
+                        if table == "document_copies":
+                            relative = (
+                                f"pdf/document-{record['document_id']}"
+                                f"-copy-{record['revision']}.pdf"
+                            )
                         target = stage / relative
                         target.parent.mkdir(exist_ok=True)
                         target.write_bytes(binary)
