@@ -35,6 +35,7 @@ from app.services.records import (
     parse_amount,
     search_key,
 )
+from app.ui.spelling import SpellField
 from app.ui.theme import STATUS_TONE, StatusDelegate
 from app.ui.work_windows import work_windows
 
@@ -410,11 +411,13 @@ class RepairDialog(SafeDialog):
         form.addRow("Общая стоимость, ₽", self.amount)
         layout.addLayout(form)
         layout.addWidget(plain_label("Ход работ"))
-        self.description = QPlainTextEdit(self.repair.get("description", ""))
+        self.description = SpellField(records.path.parent, self.repair.get("description", ""))
         self.description.setAccessibleName("Ход работ")
         layout.addWidget(self.description, 1)
         layout.addWidget(plain_label("Рекомендации"))
-        self.recommendations = QPlainTextEdit(self.repair.get("recommendations", ""))
+        self.recommendations = SpellField(
+            records.path.parent, self.repair.get("recommendations", "")
+        )
         self.recommendations.setAccessibleName("Рекомендации")
         layout.addWidget(self.recommendations, 1)
         self.suggest_recommendations()
@@ -704,6 +707,10 @@ class VehicleCard(QDialog):
 
     def refresh_repair(self, vehicle_id, repair_id):
         if self.vehicle_id == vehicle_id:
+            editor = self._work_windows.covered.get(self)
+            if editor is not None and editor.repair.get("id") != repair_id:
+                self.refresh()
+                return
             self.refresh(repair_id)
 
     def refresh(self, repair_id=None):
@@ -875,7 +882,9 @@ class VehicleCard(QDialog):
         self.refresh()
 
     def edit_repair(self, repair=None):
-        return open_repair_window(self.records, self.vehicle_id, self, repair)
+        editor = open_repair_window(self.records, self.vehicle_id, self, repair)
+        self._work_windows.cover(self, editor)
+        return editor
 
     def add_repair(self):
         return self.edit_repair()

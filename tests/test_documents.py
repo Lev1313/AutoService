@@ -6,7 +6,7 @@ from contextlib import closing
 import pytest
 from PySide6.QtCore import QBuffer, QIODevice, Qt
 from PySide6.QtPdf import QPdfDocument
-from PySide6.QtTest import QTest
+from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QMessageBox
 
 from app.database.connection import (
@@ -385,9 +385,10 @@ def test_document_dialog_preview_save_history_and_stale_preview_guard(
     assert not dialog.export_button.isEnabled()
     assert dialog.print_button.text() == "Оформить и печатать"
     assert dialog.document_status.text() == "Черновик"
+    preview = QSignalSpy(dialog.preview_timer.timeout)
     dialog.description.setPlainText("Изменённый текст документа")
     assert dialog.content is None
-    QTest.qWait(dialog.preview_timer.interval() + 100)
+    assert preview.count() or preview.wait(5000)
     assert "Изменённый текст документа" in dialog.pdf.getAllText(0).text()
     dialog.draft_button.click()
     assert service.draft(repair)["description"] == "Изменённый текст документа"

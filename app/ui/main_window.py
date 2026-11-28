@@ -159,6 +159,8 @@ class MainWindow(QMainWindow):
     def list_work_windows(self):
         self.window_menu.clear()
         for dialog in self.workspace.dialogs:
+            if dialog in self.workspace.covered:
+                continue
             action = self.window_menu.addAction(dialog.windowTitle())
             action.triggered.connect(
                 lambda checked=False, window=dialog: self.workspace.activate(window)

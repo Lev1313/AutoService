@@ -49,6 +49,7 @@ from app.services.receipt_pdf import pdf_bytes, save_pdf
 from app.services.records import amount_text
 from app.services.service_sheet_pdf import sheet_signature
 from app.ui.sheet_editor import SheetEditor
+from app.ui.spelling import SpellField, TitleDelegate
 from app.ui.vehicles import ERRORS, SafeDialog, plain_label, primary_button, vehicle_label
 
 ITEM_FIELDS = ("title", "quantity", "price")
@@ -179,14 +180,14 @@ class DocumentDialog(SafeDialog):
         self.kind.currentIndexChanged.connect(self.changed)
         left.addWidget(self.kind)
         left.addWidget(plain_label("Ход работ"))
-        self.description = QPlainTextEdit()
+        self.description = SpellField(records.path.parent)
         self.description.textChanged.connect(self.changed)
         left.addWidget(self.description, 1)
         self.recommendations_panel = QWidget()
         recommendations_layout = QVBoxLayout(self.recommendations_panel)
         recommendations_layout.setContentsMargins(0, 0, 0, 0)
         recommendations_layout.addWidget(plain_label("Рекомендации"))
-        self.recommendations = QPlainTextEdit()
+        self.recommendations = SpellField(records.path.parent)
         self.recommendations.setPlaceholderText(
             "Сохраняются в ремонте и переносятся в следующий визит этой машины."
         )
@@ -219,6 +220,7 @@ class DocumentDialog(SafeDialog):
             positions.addLayout(summary)
 
             table = QTableWidget(0, len(ITEM_FIELDS))
+            table.setItemDelegateForColumn(0, TitleDelegate(records.path.parent, table))
             table.setAccessibleName(heading)
             table.setHorizontalHeaderLabels(("Наименование", "Кол-во", "Цена, ₽"))
             table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -262,7 +264,7 @@ class DocumentDialog(SafeDialog):
         self.preview_note.setContentsMargins(18, 12, 18, 12)
         self.preview_panel.addWidget(self.preview_note)
         self.preview_panel.addWidget(self.view)
-        self.sheet_editor = SheetEditor(self)
+        self.sheet_editor = SheetEditor(self, records.path.parent)
         self.sheet_editor.done.connect(self.finish_sheet)
         self.sheet_editor.canvas.edited.connect(self.sheet_changed)
         self.sheet_editor.canvas.failed.connect(self.sheet_error)
@@ -530,9 +532,10 @@ class DocumentDialog(SafeDialog):
             self.changed()
 
     def commit_item_editor(self):
-        focused = self.focusWidget()
         for table in self.item_tables.values():
-            if focused is not None and table.viewport().isAncestorOf(focused):
+            editor = table.indexWidget(table.currentIndex())
+            if editor is not None:
+                table.commitData(editor)
                 table.setFocus()
                 break
 

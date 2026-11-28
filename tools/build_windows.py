@@ -9,12 +9,14 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from importlib.util import find_spec
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 
 def build(output: Path, compiler: Path | None = None):
     project = Path(__file__).resolve().parents[1]
+    russian_dictionary = Path(find_spec("spylls").origin).parent / "hunspell/data/ru"
     version = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))["project"][
         "version"
     ]
@@ -73,6 +75,8 @@ def build(output: Path, compiler: Path | None = None):
             "--collect-data",
             "reportlab",
             "--add-data",
+            f"{russian_dictionary}:spylls/hunspell/data/ru",
+            "--add-data",
             f"{project / 'app' / 'assets'}:app/assets",
             "--exclude-module",
             "pytest",
@@ -111,6 +115,7 @@ def build(output: Path, compiler: Path | None = None):
         "reportlab",
         "pillow",
         "charset-normalizer",
+        "spylls",
     ):
         distribution = importlib.metadata.distribution(name)
         for item in distribution.files or []:

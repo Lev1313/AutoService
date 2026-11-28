@@ -18,6 +18,7 @@ from PySide6.QtCore import QBuffer, QDate, QIODevice, QSize, QTimer
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QMenu
 
 from app.bootstrap import create_application, create_window, open_startup_window
 from app.database.connection import (
@@ -35,6 +36,7 @@ from app.services.documents import Documents
 from app.services.export_data import export_database
 from app.services.maintenance import Maintenance
 from app.services.records import Records
+from app.services.spelling import dictionary_job
 from app.services.txt_import import TxtImport
 from app.ui.customers import CustomerVehiclePicker
 from app.ui.documents import DocumentDialog, print_pdf
@@ -439,11 +441,17 @@ def reopen(root, report):
         check(not cursor.isNull(), "Выделение слова в редакторе")
         canvas.input.setTextCursor(cursor)
         canvas.set_size(12)
-        QTest.keyClicks(canvas, "Demo")
+        canvas.input.insertPlainText("потшипника")
         canvas.refresh()
+        dictionary_job().result(timeout=30)
+        cursor = canvas.input.document().find("потшипника")
+        menu = QMenu(dialog)
+        check(canvas.spelling.menu(cursor.selectionStart() + 1, menu), "Орфография на листе")
         check(dialog.grab().save(str(root / "sheet-editor.png")), "Снимок ручной правки")
+        correction = next(action for action in menu.actions() if action.text() == "подшипника")
+        correction.trigger()
         check(dialog.save(close=False), "Сохранение копии листа")
-        check("Demo" in dialog.pdf.getAllText(0).text(), "Последнее изменение в PDF копии")
+        check("подшипника" in dialog.pdf.getAllText(0).text(), "Исправленное слово в PDF копии")
         check(dialog.current_document["revision"] == 1, "Копия в истории")
         printer.setOutputFileName(str(root / "sheet-copy-printed.pdf"))
         print_pdf(dialog.pdf, printer)

@@ -23,6 +23,10 @@ https://jrsoftware.org/isinfo.php
 
 Материалы разработки и инструкция повторной сборки хранятся в проекте AutoService.
 
+Проверка орфографии использует Spylls 0.1.7 и русский словарь ru.aff / ru.dic из этой поставки.
+Исходники и словарь: https://github.com/zverok/spylls
+Текст лицензии Spylls находится в licenses/spylls/LICENSE.
+
 
 Офлайн-справочник марок и моделей: Global Car Models, MIT.
 Copyright (c) 2025 Global Car Models.

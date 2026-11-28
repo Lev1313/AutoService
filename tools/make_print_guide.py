@@ -65,7 +65,6 @@ def build_guide(output_dir):
     }
     guide = (ROOT / "docs" / "OWNER-GUIDE.txt").read_text(encoding="utf-8-sig")
     blocks = list(guide_blocks(guide))
-    page_count = sum(kind == "chapter" for kind, _ in blocks)
     logo = ImageReader(str(ROOT / "app" / "assets" / "autoservice.ico"))
     story = []
     for kind, text in blocks:
@@ -93,7 +92,7 @@ def build_guide(output_dir):
         canvas.line(MARGIN, height - 19 * mm, width - MARGIN, height - 19 * mm)
         canvas.line(MARGIN, 17 * mm, width - MARGIN, 17 * mm)
         canvas.drawString(MARGIN, 11.5 * mm, f"AutoService {VERSION}")
-        canvas.drawRightString(width - MARGIN, 11.5 * mm, f"{document.page} / {page_count}")
+        canvas.drawRightString(width - MARGIN, 11.5 * mm, str(document.page))
         canvas.restoreState()
 
     output_dir = Path(output_dir).resolve()

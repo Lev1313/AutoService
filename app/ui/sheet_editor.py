@@ -7,6 +7,7 @@ from PySide6.QtGui import (
     QColor,
     QKeySequence,
     QPainter,
+    QPainterPath,
     QPen,
     QTextBlockFormat,
     QTextCharFormat,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QTextEdit,
     QVBoxLayout,
@@ -34,6 +36,7 @@ from app.services.service_sheet_pdf import (
     sheet_blocks,
     sheet_signature,
 )
+from app.ui.spelling import RED, SpellMarks
 
 KEEP = QTextFormat.Property.UserProperty + 1
 SOURCE = QTextFormat.Property.UserProperty + 2
@@ -80,7 +83,7 @@ class SheetCanvas(QAbstractScrollArea):
     locationChanged = Signal()
     failed = Signal(str)
 
-    def __init__(self, parent):
+    def __init__(self, parent, directory):
         super().__init__(parent)
         self.setAccessibleName("Текст сервисного листа на странице А4")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -88,6 +91,8 @@ class SheetCanvas(QAbstractScrollArea):
         self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
         self.input = QTextEdit(self)
         self.input.hide()
+        self.spelling = SpellMarks(self.input, directory, overlay=True)
+        self.spelling.updated.connect(self.viewport().update)
         self.input.setAcceptRichText(False)
         self.input.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self.input.textChanged.connect(self.changed)
@@ -178,6 +183,7 @@ class SheetCanvas(QAbstractScrollArea):
 
     def open(self, snapshot, original_pdf=None):
         self.timer.stop()
+        self.spelling.ignored.clear()
         self.loading = True
         self.snapshot = snapshot
         self.hover_block = -1
@@ -326,6 +332,21 @@ class SheetCanvas(QAbstractScrollArea):
                     painter.fillRect(
                         QRectF(left, line.top, right - left, line.height), QColor(33, 114, 218, 88)
                     )
+                for start, end in self.spelling.by_block.get(line.block, ()):
+                    low, high = max(start, positions[0]), min(end, positions[-1])
+                    if low >= high:
+                        continue
+                    left = edges[min(bisect_left(positions, low), len(edges) - 1)]
+                    right = edges[min(bisect_left(positions, high), len(edges) - 1)]
+                    y = line.top + line.height - 1
+                    wave = QPainterPath(QPointF(left, y))
+                    x, step = left, 1
+                    while x < right:
+                        x = min(x + 1.8, right)
+                        wave.lineTo(x, y + step * 0.8)
+                        step = -step
+                    painter.setPen(QPen(RED, 1 / scale))
+                    painter.drawPath(wave)
                 if i == active and not cursor.hasSelection() and self.caret and self.hasFocus():
                     x = edges[min(bisect_left(positions, lo), len(positions) - 1, len(edges) - 1)]
                     painter.setPen(QPen(QColor("#101419"), 1.3 / scale))
@@ -343,7 +364,7 @@ class SheetCanvas(QAbstractScrollArea):
             painter.restore()
         painter.end()
 
-    def hit(self, point):
+    def hit(self, point, *, text_only=False):
         if self.timer.isActive():
             self.refresh()
         scroll_y = point.y() + self.verticalScrollBar().value() - 6
@@ -355,6 +376,10 @@ class SheetCanvas(QAbstractScrollArea):
             return None
         i = min(rows, key=lambda j: abs(y - self.lines[j].top - self.lines[j].height / 2))
         line, positions = self.lines[i], self.spans[i]
+        if text_only and not (
+            line.top <= y <= line.top + line.height and line.edges[0] <= x <= line.edges[-1]
+        ):
+            return None
         char = bisect_left(line.edges, x)
         if char and (char == len(line.edges) or x - line.edges[char - 1] < line.edges[char] - x):
             char -= 1
@@ -364,6 +389,14 @@ class SheetCanvas(QAbstractScrollArea):
             and line.top - 2 <= y <= line.top + line.height + 2
         )
         return positions[min(char, len(positions) - 1)], handle
+
+    def contextMenuEvent(self, event):
+        hit = self.hit(event.pos(), text_only=True)
+        if hit and not hit[1]:
+            menu = QMenu(self)
+            if self.spelling.menu(hit[0], menu):
+                menu.exec(event.globalPos())
+            menu.deleteLater()
 
     def mousePressEvent(self, event):
         if event.button() != Qt.MouseButton.LeftButton or not self.lines:
@@ -494,12 +527,12 @@ class SheetCanvas(QAbstractScrollArea):
 class SheetEditor(QWidget):
     done = Signal()
 
-    def __init__(self, parent):
+    def __init__(self, parent, directory):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(QLabel("Изменения на листе относятся только к печати"))
-        self.canvas = SheetCanvas(self)
+        self.canvas = SheetCanvas(self, directory)
         row = QHBoxLayout()
         layout.addLayout(row)
         self.size_field = QDoubleSpinBox()

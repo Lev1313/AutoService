@@ -215,7 +215,9 @@ def test_three_cars_can_be_edited_independently(application, tmp_path, monkeypat
             assert card.add_repair() is editor
         assert len(window.workspace.dialogs) == 6
         assert window.isEnabled()
-        assert all(dialog.isVisible() and not dialog.isModal() for dialog in cards + repairs)
+        assert all(not card.isVisible() for card in cards)
+        assert all(dialog.isVisible() and not dialog.isModal() for dialog in repairs)
+        assert page.open_vehicle() is repairs[2]
         assert [card.windowTitle() for card in cards] == [
             "а123вс98",
             "SHHFK2760BU000002",
@@ -227,14 +229,19 @@ def test_three_cars_can_be_edited_independently(application, tmp_path, monkeypat
         vehicle_editor.save()
         assert cards[0].windowTitle() == "в456км98"
         window.list_work_windows()
-        assert len(window.window_menu.actions()) == 6
-        assert "в456км98" in [action.text() for action in window.window_menu.actions()]
+        assert len(window.window_menu.actions()) == 3
+        assert "в456км98" not in [action.text() for action in window.window_menu.actions()]
 
         assert repairs[1].save(close=False)
         assert cards[1].open_repair() is repairs[1]
         assert cards[1].preview.toPlainText() == "Ремонт 2"
         assert repairs[0].description.toPlainText() == "Ремонт 1"
         assert repairs[2].description.toPlainText() == "Ремонт 3"
+        repairs[0].reject()
+        assert cards[0].isVisible() and not cards[1].isVisible()
+        repairs[1].save_button.click()
+        assert cards[1].isVisible()
+        assert cards[1].preview.toPlainText() == "Ремонт 2"
 
         with monkeypatch.context() as canceled:
             canceled.setattr(QMessageBox, "question", lambda *_: QMessageBox.StandardButton.Cancel)
